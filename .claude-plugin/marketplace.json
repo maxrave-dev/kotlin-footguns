@@ -1,0 +1,24 @@
+{
+  "name": "maxrave",
+  "owner": {
+    "name": "maxrave-dev",
+    "url": "https://simpmusic.org"
+  },
+  "description": "Agent skills by maxrave-dev, distilled from shipping SimpMusic in production since 2023.",
+  "plugins": [
+    {
+      "name": "kotlin-footguns",
+      "source": "./",
+      "description": "140 battle-tested agent skills mapping the footguns of Kotlin, Compose Multiplatform and desktop JVM development — mined from a production codebase, every claim verified against the real tree.",
+      "category": "engineering",
+      "keywords": [
+        "kotlin",
+        "compose-multiplatform",
+        "android",
+        "desktop-jvm",
+        "footguns",
+        "skills"
+      ]
+    }
+  ]
+}
