@@ -26,13 +26,13 @@ not available — a database column, a fixed-width protocol field, an interface 
 **A sentinel that is legal in the *type* is not a sentinel.** `-1L` is not a valid position, so
 parking a position field at `-1L` looks safe — and it is safe only while every reader agrees. The
 source project's own record describes what happened once that agreement broke: one branch wrote
-`-1L` to mean "no position", a second branch ignored negative values entirely and so never overwrote
-it, a third restored the neighbouring total without touching it, and the single formatter for the
-field rendered any negative as a placeholder string. The screen ended up showing a correct total next
-to a placeholder that never cleared, because nothing was guaranteed to write again. The fix was to
-stop minting the sentinel *on the path that had no guaranteed follow-up write* and park the field
-there at a real in-domain value. The initialiser elsewhere still mints it, which is the point: a
-sentinel is worth exactly as much as the guarantee that something overwrites it.
+`-1L` to mean "no position", a second ignored negative values entirely and so never overwrote it, a
+third restored the neighbouring total without touching it, and the single formatter rendered any
+negative as a placeholder. The screen showed a correct total next to a placeholder that never
+cleared, because nothing was guaranteed to write again. The fix was to stop minting the sentinel *on
+the path with no guaranteed follow-up write*, parking the field there at a real in-domain value. The
+initialiser elsewhere still mints it, which is the point: a sentinel is worth exactly as much as the
+guarantee that something overwrites it.
 
 The formatter itself was right — reserving the whole negative half is exactly this pattern:
 
@@ -77,6 +77,23 @@ values the source itself can emit and returns `null` for everything else, then c
 normalized result. `null` from that normalizer means "nobody has ever told us", which is exactly
 what you want it to mean.
 
+**The same rule has a UI-colour form, and the stand-in is visible.** A colour derived from an image
+— a page tint, an accent, a glow — is *not resolved yet* for the first frames, and the tempting
+default is a theme colour: it composes and looks plausible. Same defect — a real value the success
+path also produces. It flashes as the wrong tone on load, and while nothing is selected it paints a
+confident tint for something that does not exist. Two honest answers, used together:
+
+```kotlin
+// adapted — Unspecified is the "not resolved" sentinel; null is "nothing is selected"
+val state = rememberDominantColorState(defaultColor = Color.Unspecified, …)
+fun rememberGlowTint(imageUrl: String?): Color? =
+    if (imageUrl == null) null else state.color.takeIf { it.isSpecified }
+```
+
+The consumer must then treat `null` as *draw nothing* rather than substituting its own default: the
+gradient collapses into the page colour, so the layer is invisible until a tone arrives. A default
+at the consumer re-creates the stand-in one layer down, where it is harder to find.
+
 **Never invent a placeholder to satisfy a non-null field.** `"Unknown Artist"`, `"0:00"`, `1970-01-01`
 are all values that will be persisted, matched against, sorted, and eventually shown. If the model
 demands a value the payload does not contain, the model is wrong — make the field nullable or drop
@@ -98,17 +115,24 @@ grep -rnE "to(Int|Long|Float|Double)OrNull\(\) \?: (0|0L|0f|-1|-1L)\b" --include
 grep -rniE "\?: \"(unknown|n/?a|untitled|none|no name)" --include="*.kt" . | grep -v "/build/"
 ```
 
-For each hit, ask the one question that settles it: **can the success path produce this same value?**
-If yes, the fallback is a defect regardless of how well documented it is. The second command finds
-invented placeholders specifically — expect it to hit display strings that were never meant to be
-persisted, and check where each one ends up. Widening either pattern to a bare `?: ""` or
-`?: emptyList()` does not scale this up: on a codebase of any size it returns hundreds of lines,
-most of them legitimate. Narrow to the parse boundary you are auditing instead.
+For each hit, ask the one question that settles it: **can the success path produce this same
+value?** If yes, the fallback is a defect however well documented. The second command finds invented
+placeholders specifically — expect it to hit display strings never meant to be persisted, and check
+where each one ends up. Widening either to a bare `?: ""` or `?: emptyList()` does not scale: on any
+sizeable codebase it returns hundreds of lines, most legitimate. Narrow to the boundary you audit.
 
 Then confirm the unknown state is reachable by callers:
 
 ```bash
 grep -rnE "fun isKnown|data object Unknown|-> Unknown|UNKNOWN" --include="*.kt" . | grep -v "/build/"
+```
+
+For the colour form, list every derived-colour default beside every sentinel check — a theme role in
+the first list with no counterpart in the second is a stand-in nobody can tell from a real value:
+
+```bash
+grep -rnE "default(On)?Color *=|fallbackColor *=" --include="*.kt" . | grep -v "/build/"
+grep -rn "isSpecified\|Color.Unspecified" --include="*.kt" . | grep -v "/build/"
 ```
 
 Finally, feed the parser a payload with the field deleted, then one with the field present but

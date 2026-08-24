@@ -9,7 +9,7 @@
     {
       "name": "kotlin-footguns",
       "source": "./",
-      "description": "140 battle-tested agent skills mapping the footguns of Kotlin, Compose Multiplatform and desktop JVM development — mined from a production codebase, every claim verified against the real tree.",
+      "description": "216 battle-tested agent skills mapping the footguns of Kotlin, Compose Multiplatform and desktop JVM development — mined from a production codebase, every claim verified against the real tree.",
       "category": "engineering",
       "keywords": [
         "kotlin",

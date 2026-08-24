@@ -1,7 +1,7 @@
 {
   "name": "kotlin-footguns",
-  "version": "1.0.0",
-  "description": "140 battle-tested agent skills mapping the footguns of Kotlin, Compose Multiplatform and desktop JVM development. Mined from SimpMusic, a production cross-platform app shipping since 2023; traps-first, with verification commands that were executed against the real codebase.",
+  "version": "1.1.0",
+  "description": "216 battle-tested agent skills mapping the footguns of Kotlin, Compose Multiplatform and desktop JVM development. Mined from SimpMusic, a production cross-platform app shipping since 2023; traps-first, with verification commands that were executed against the real codebase.",
   "author": {
     "name": "maxrave-dev",
     "url": "https://github.com/maxrave-dev"

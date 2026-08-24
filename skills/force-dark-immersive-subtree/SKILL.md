@@ -5,19 +5,15 @@ description: Keep one part of a Compose app rendered dark — screens drawn over
 
 # Force-dark immersive subtree
 
-Some screens are dark by construction: they draw over full-bleed artwork with white text on top. When
-the app also supports a light theme, those screens must ignore it. The mechanism is to re-provide the
-theme for that subtree only.
+Some screens are dark by construction: they draw over full-bleed artwork with white text on top, and
+must ignore a light theme. The mechanism is to re-provide the theme for that subtree only.
 
 ```kotlin
 // adapted
 @Composable
 fun ForceDarkContent(content: @Composable () -> Unit) {
     val darkScheme = LocalForcedDarkColorScheme.current ?: MaterialTheme.colorScheme
-    MaterialTheme(
-        colorScheme = darkScheme,
-        typography = typo(darkScheme, forceDark = true),
-    ) {
+    MaterialTheme(colorScheme = darkScheme, typography = typo(darkScheme, forceDark = true)) {
         CompositionLocalProvider(
             LocalForceDarkText provides true,
             LocalIsDarkTheme provides true,
@@ -27,17 +23,11 @@ fun ForceDarkContent(content: @Composable () -> Unit) {
         )
     }
 }
-```
 
-The dark scheme itself is resolved **once**, at the app theme, and published through a local so no
-screen builds one of its own:
-
-```kotlin
-// adapted
+// …and the scheme itself is resolved ONCE at the app theme, published through that local:
 val forcedDarkScheme =
     if (isDark) colorScheme
     else rememberDynamicColorScheme(seedColor, isDark = true, isAmoled = true, style = TonalSpot)
-// … CompositionLocalProvider(LocalForcedDarkColorScheme provides forcedDarkScheme) { content() }
 ```
 
 ## Traps
@@ -45,12 +35,12 @@ val forcedDarkScheme =
 **A text-colour flag is not enough, and this is the failure people ship.** A boolean that only feeds
 your typography recolours `Text` and nothing else. Icons, buttons, dividers and every other Material
 default read `LocalContentColor` and `MaterialTheme.colorScheme`, which in light theme go
-dark-on-light and grey against the artwork. Providing the whole scheme fixes the subtree at once.
+dark-on-light and grey against the artwork. The whole scheme fixes the subtree at once.
 
-**Resolve the forced scheme at the theme, not per screen.** A seed-derived scheme is real work
-(tonal-palette generation), and screens that each build their own drift apart. Publish one value
-through a `staticCompositionLocalOf<ColorScheme?> { null }` whose null default means "you are outside
-the app theme" and lets consumers fall back to `MaterialTheme.colorScheme`.
+**Resolve the forced scheme at the theme, not per screen.** A seed-derived scheme is real work, and
+screens that each build their own drift apart. Publish one value through a
+`staticCompositionLocalOf<ColorScheme?> { null }` whose null default means "outside the app theme"
+and lets consumers fall back to `MaterialTheme.colorScheme`.
 
 **Wrap at the navigation destination, not inside the screen composable.** That covers the screen's
 top bar, its loading and error states and anything it hosts, and keeps the decision in one readable
@@ -63,16 +53,22 @@ composable<AlbumDestination> { entry ->
 }
 ```
 
+**But that list is a registration list, and registration lists drift.** Nine wrap sites here across
+three files, with nothing tying them to the screens that need one — so a new immersive screen is
+correct until somebody remembers this file exists. It then fails only in the light theme, which is
+the one nobody reviews in. Same shape as `nav-tab-registration-drift`, same remedy: make membership
+derivable from the screen — anything painting its background from an extracted palette belongs on
+the list, which makes the pairing greppable (step 1). Write the reason at the wrap.
+
 **Sheets and dialogs DO inherit — this is what makes the approach hold, and it is verifiable.** They
 render in their own platform window, which looks like it should sever the composition, but the host
 view is handed the *calling* composition as its parent composition context. Checked against the
 compiled libraries rather than the documentation: in Compose UI's Android artifact,
 `PopupLayout.setContent(CompositionContext, content)` calls `setParentCompositionContext(ctx)` first,
 `DialogWrapper` exposes the same two-argument `setContent`, and Material 3's
-`ModalBottomSheetDialogLayout` does likewise; the context passed in comes from
-`rememberCompositionContext()` in the caller. Every CompositionLocal — yours and Material's —
-therefore flows across the window boundary. A sheet's colours should therefore *read* the flag rather
-than hardcode dark — dark from an immersive screen, theme-following from a normal one:
+`ModalBottomSheetDialogLayout` does likewise; the context comes from `rememberCompositionContext()`
+in the caller. Every CompositionLocal therefore crosses the window boundary — so a sheet's colours
+should *read* the flag rather than hardcode dark:
 
 ```kotlin
 // adapted
@@ -84,34 +80,40 @@ fun rememberSurfaceColors(): SurfaceColors {
 }
 ```
 
-**What does NOT inherit is a composition you root yourself.** A second activity or desktop window
-with its own `setContent`, a widget or other remote composition, or a view inflated without its
-parent composition context being set — in that last case the runtime resolves a parent from the
-window (`AbstractComposeView.resolveParentCompositionContext()`) and your locals are the defaults.
-Every such root must re-provide the theme itself.
+**What does NOT inherit is anything that is not a descendant** — two shapes, the second surprising.
+A composition you root yourself: a second activity or desktop window with its own `setContent`, a
+widget, or a view inflated without its parent composition context being set (there the runtime
+resolves a parent from the window, `AbstractComposeView.resolveParentCompositionContext()`, and your
+locals are the defaults). And a **sibling of the navigation host**: an overlay declared beside the
+`NavHost` — a persistent mini or expanded player, a global snackbar host — is in the same composition
+and still cannot see a local provided at a destination, because provision flows *down*. Two of the
+nine wraps here exist for exactly that. Every such root or sibling re-provides the theme itself.
 
-**Do not re-ask the system inside the subtree.** A platform effect calling `isSystemInDarkTheme()` to
-pick a blur tint or a system-bar appearance will disagree with the forced subtree. Publish the
-decision as a local (`LocalIsDarkTheme`) and read that everywhere, including from the wrapper.
+**Do not re-ask the system inside the subtree.** An effect calling `isSystemInDarkTheme()` for a blur
+tint or a system-bar appearance disagrees with the forced subtree — publish the decision as a local
+(`LocalIsDarkTheme`) and read that everywhere, the wrapper included.
 
-**Force-dark is not accessibility dark mode.** These screens are dark because of what is behind them,
-not because the user asked for a dark UI. Do not let the flag leak into settings, into what you
-persist, or into the system-bar appearance for the rest of the app.
+**Force-dark is not accessibility dark mode.** The screen is dark because of what is behind it, not
+because the user asked — never let the flag reach settings, persistence or the system-bar appearance.
 
 **Custom token locals must be re-provided too.** Anything outside the Material scheme — brand-state
-colours, shimmer tones, overlays — has its own local and light/dark instances, and the wrapper must
-hand over the dark set explicitly (`semantic-color-tokens-compositionlocal`).
+colours, shimmer tones, overlays — has its own local and light/dark pair, handed over explicitly
+(`semantic-color-tokens-compositionlocal`).
 
 ## Verifying it
 
-1. Every place that forces the subtree, to confirm each sits at a destination, not inside a screen:
+1. Every wrap, against every screen that needs one — compare screen *names*, never paths: the wrap
+   sits at the destination and the palette call inside the screen file, so the two lists share no
+   path. Every name in the second must be covered by the first — 9 against 15 here — except helpers,
+   and the roots and siblings above, which must re-provide the theme themselves; open those and check:
 
    ```bash
-   grep -rn --include='*.kt' "ForceDarkContent" . | grep -v '/build/'
+   grep -rn --include='*.kt' -A 3 "ForceDarkContent {" . | grep -v '/build/' | grep -oE "[A-Za-z]+(Screen|ScreenContent|Player)\(" | sort -u
+   grep -rln --include='*.kt' "toImmersiveBackground\|rememberPaletteState" . | grep -v '/build/' | xargs -n1 basename | sort
    ```
 
-2. Platform code that asks the system directly instead of reading the published local — each hit
-   needs a reason:
+2. Platform code asking the system directly instead of reading the published local — each hit needs
+   a reason:
 
    ```bash
    grep -rn --include='*.kt' "isSystemInDarkTheme()" . | grep -v '/build/'
@@ -129,12 +131,10 @@ hand over the dark set explicitly (`semantic-color-tokens-compositionlocal`).
    ```
 
    Expect `invokevirtual … setParentCompositionContext` as the first call in the body. `sort -V`
-   picks the newest *cached* version, not necessarily the one your build resolves — read the echoed
-   path (plain `sort` is lexicographic and hands you `1.8.3` ahead of `1.12.0`). Swap the class for
-   `androidx.compose.material3.ModalBottomSheetDialogLayout`, against a `*material3-android*` AAR,
-   to check the sheet host the same way.
+   picks the newest *cached* version, not the one your build necessarily resolves — read the echoed
+   path (plain `sort` hands you `1.8.3` ahead of `1.12.0`). Swap in
+   `androidx.compose.material3.ModalBottomSheetDialogLayout` against a `*material3-android*` AAR.
 
-4. By eye, and this is the test that catches the "text flag only" failure: set the app to light
-   theme, open an immersive screen, and look at the *icons* and *disabled* states rather than the
-   headline text. Then open a sheet from that screen, and open the same sheet from a normal screen,
-   and confirm they differ.
+4. By eye — the test that catches the "text flag only" failure: in **light** theme, open an immersive
+   screen and look at the *icons* and *disabled* states rather than the headline text. Then open one
+   sheet from that screen and the same sheet from a normal screen, and confirm they differ.

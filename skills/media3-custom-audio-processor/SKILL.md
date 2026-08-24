@@ -8,33 +8,28 @@ description: Write a custom audio processor for a Media3/ExoPlayer audio pipelin
 A processor is a `BaseAudioProcessor` subclass installed in the sink's processor chain:
 
 ```kotlin
-DefaultAudioSink.Builder(context)
-    .setAudioProcessorChain(
-        DefaultAudioSink.DefaultAudioProcessorChain(
-            arrayOf(myFilter, myGain),   // yours, in order
-            SilenceSkippingAudioProcessor(...),
-            SonicAudioProcessor(),
-        ),
-    ).build()
+DefaultAudioSink.Builder(context).setAudioProcessorChain(
+    DefaultAudioSink.DefaultAudioProcessorChain(
+        arrayOf(myFilter, myGain),   // yours, in order
+        SilenceSkippingAudioProcessor(...), SonicAudioProcessor(),
+    ),
+).build()
 ```
 
-The four members that matter: `onConfigure` (negotiate the format), `isActive` (am I in the
-chain at all), `queueInput` (do the work), `onFlush` / `onReset` (drop state).
-
-Build the chain inside a `DefaultRenderersFactory` subclass's `buildAudioSink` override (the
-member is `protected` there) so the instances are created **per player**. That matters as soon as more than one player is alive — a crossfade, a preroll, a
-precache — because a processor carries per-stream state and cannot be shared.
+The four members that matter: `onConfigure` (negotiate the format), `isActive` (am I in the chain at
+all), `queueInput` (do the work), `onFlush` / `onReset` (drop state). Build the chain inside a
+`DefaultRenderersFactory` subclass's `buildAudioSink` override (the member is `protected` there) so
+the instances are created **per player** — as soon as more than one is alive (a crossfade, a preroll,
+a precache) that matters, because a processor carries per-stream state and cannot be shared.
 
 ## Traps
 
-**`isActive()` is asked when the chain is built, not per buffer.** A processor that answers `false`
-is left out of the chain and is not consulted again until the next configure or flush. So a
-parameter you flip at runtime — a fade that starts mid-track, a filter you enable when a transition
-begins — must **not** ride `isActive`. Return `true` permanently and branch inside `queueInput`:
+**`isActive()` is asked when the chain is built, not per buffer** — so a parameter you flip at
+runtime must **not** ride it. A processor answering `false` while "disabled" is left out of the
+chain and is not consulted again until the next configure or flush, which from outside looks like
+"the feature works, but only from the next track on". Stay active and branch inside `queueInput`:
 
 ```kotlin
-override fun isActive(): Boolean = true
-
 override fun queueInput(inputBuffer: ByteBuffer) {
     val remaining = inputBuffer.remaining()
     if (remaining == 0) return
@@ -44,20 +39,41 @@ override fun queueInput(inputBuffer: ByteBuffer) {
 }
 ```
 
-From outside, getting this wrong looks like "the feature works, but only from the next track on".
-Reserve a `false` answer for things fixed for the whole stream — an unsupported channel count, a
-format you decline.
+**Do not get that by overriding `isActive()` to `true` — do not override it at all.** The base class
+already answers it from the format `onConfigure` just returned:
 
-**Trust the code over the comment on this one.** It is common to find a KDoc block promising
-"when disabled, `isActive` returns false and the pipeline skips this processor entirely" sitting
-directly above `override fun isActive(): Boolean = true`. The comment describes a first draft; the
-override is what shipped. Read the override.
+```
+public boolean isActive();               // BaseAudioProcessor, decompiled
+   0: aload_0
+   1: getfield  pendingOutputAudioFormat
+   4: getstatic AudioProcessor$AudioFormat.NOT_SET
+   7: if_acmpeq …                        // active ⇔ pendingOutputAudioFormat !== NOT_SET
+```
 
-**Always consume the whole input buffer.** Leaving even one byte behind makes the pipeline offer
-the same buffer again, forever, having made no progress — silence with no error, no exception and
-no log line. A `while (remaining() >= 2)` loop over 16-bit samples is fine only because PCM16
-frames are an even number of bytes; add the drain anyway, because it costs nothing and it is the
-difference between a wedge and a click:
+`configure()` is `final`: it assigns `pendingOutputAudioFormat = onConfigure(format)` and *then*
+asks `isActive()`. The default therefore already means "active iff I accepted the format" — active
+for the whole stream once accepted, correctly absent for one you decline — which is exactly what a
+runtime-toggled processor wants, for free. Forcing `true` claims membership while handing back a
+format you cannot read, and `AudioProcessingPipeline` catches you at configure time:
+
+```java
+AudioFormat out = p.configure(f);
+if (p.isActive()) { Preconditions.checkState(!out.equals(NOT_SET)); f = out; }
+```
+
+That is an `IllegalStateException` on the first stream in an encoding you decline — latent for as
+long as everything happens to be PCM 16-bit, which is why forced overrides survive in codebases.
+Activity is about the *format*, never about the setting: a neutral curve, a fade at 1.0 or a filter
+at pass-through all stay active and take the bulk-copy path below.
+
+**Trust the code over the comment on this one.** It is common to find a KDoc promising "when
+disabled, `isActive` returns false and the pipeline skips this processor entirely" sitting directly
+above `override fun isActive(): Boolean = true`. Both are wrong — read the override, then delete it.
+
+**Always consume the whole input buffer.** Leaving even one byte behind makes the pipeline offer the
+same buffer again, forever, having made no progress — silence with no error, no exception and no log
+line. A `while (remaining() >= 2)` loop over 16-bit samples is fine only because PCM16 frames are an
+even number of bytes; add the drain anyway, because it is the difference between a wedge and a click:
 
 ```kotlin
 while (inputBuffer.remaining() >= 2) { output.putShort(…) }
@@ -68,9 +84,8 @@ To verify: assert `inputBuffer.remaining() == 0` at the end of `queueInput` in a
 
 **`ByteBuffer.put(ByteBuffer)` throws when source and destination are the same object.**
 `replaceOutputBuffer()` normally hands back this processor's own buffer while the input belongs to
-the previous stage, so they are distinct — but a chain where your processor is first, or a pipeline
-that hands buffers through unchanged, can alias them. Either prove they cannot alias in your chain
-or guard the copy:
+the previous stage, so they are distinct — but a chain where your processor is first, or one that
+hands buffers through unchanged, can alias them. Prove they cannot, or guard the copy:
 
 ```kotlin
 private fun copyBuffer(src: ByteBuffer, dst: ByteBuffer, size: Int) {
@@ -93,13 +108,13 @@ val sleepFade = SleepFadeAudioProcessor { fadeFactor } // per player, same sourc
 Passing a `() -> Float` rather than a value is the whole point: a single write covers both players
 of a transition without either knowing the other exists.
 
-**Read the parameter fresh on every buffer.** Capturing it in `onConfigure` or at stream start is
-the same failure as the `isActive` one, one layer down: a fade that begins — or keeps advancing —
-in the middle of an already-configured stream never reaches the output.
+**Read the parameter fresh on every buffer.** Capturing it in `onConfigure` or at stream start is the
+same failure as the `isActive` one, one layer down: a fade that begins — or keeps advancing — in the
+middle of an already-configured stream never reaches the output.
 
-**The pass-through branch runs for the entire life of the app.** If your processor is permanently
-active, its "nothing to do" path executes on every buffer of every track whether the feature is in
-use or not. Make it a bulk `output.put(inputBuffer)`, never a per-byte loop.
+**The pass-through branch runs for the entire life of the app.** Its "nothing to do" path executes on
+every buffer of every track whether the feature is in use or not. Make it a bulk
+`output.put(inputBuffer)`, never a per-byte loop.
 
 **Decline formats in `onConfigure`, and re-derive everything from it.** Return
 `AudioProcessor.AudioFormat.NOT_SET` for encodings you do not handle, and cache `sampleRate` /
@@ -115,10 +130,10 @@ override fun onConfigure(f: AudioProcessor.AudioFormat): AudioProcessor.AudioFor
 }
 ```
 
-**`onFlush` and `onReset` are not the same event.** Flush happens on every seek and format change:
-clear the *history* (filter delay lines) so the previous stream does not bleed in. Reset happens
-when the processor is torn down: restore defaults as well. Clearing user-facing parameters in
-`onFlush` makes settings appear to reset themselves on every seek.
+**`onFlush` and `onReset` are not the same event.** Flush happens on every seek and format change —
+and it is the other point where the pipeline rebuilds its active list from `isActive()` — so clear
+the *history* (filter delay lines) there, and nothing else. Reset happens at teardown: restore
+defaults too. Clearing user-facing parameters in `onFlush` makes settings reset themselves on seek.
 
 **Byte order is not free.** Call `inputBuffer.order(ByteOrder.nativeOrder())` before reading
 shorts. `ByteBuffer` defaults to big-endian; PCM in the pipeline is native-endian. Getting it wrong

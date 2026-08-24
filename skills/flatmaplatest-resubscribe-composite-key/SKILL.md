@@ -58,6 +58,25 @@ nothing:
 `distinctUntilChangedBy` is the same operator with the key extracted instead of a predicate, and it
 removes the chance of inverting the comparison at all.
 
+**A field left out of the key is a whole class of update you will never receive.** This is the mirror
+of the hashing mistake and quieter still: whatever the key omits, the operator treats as noise. A
+snapshot key of `(item, isPlaying, position)` taken from a state that *also* carries the list behind
+the item drops every emission in which only that list changed — so the collector never learns the
+list arrived, and the symptom is a feature that is simply absent rather than one that misfires. Give
+each field a cheap projection rather than leaving it out: ids rather than objects, so the comparison
+is structural and does not depend on the upstream reusing instances.
+
+```kotlin
+// adapted — names generalized
+.map { Snapshot(it.item, it.isPlaying, it.position, listIds = it.list.map { e -> e.id }) }
+.distinctUntilChanged()
+```
+
+The rule that makes this decidable without thinking about it: **the key must mention every field the
+collector body reads.** A field the body uses and the key ignores is a silent drop; a field the key
+mentions and the body ignores costs only a redundant pass. The asymmetry is the whole argument for
+erring towards a wider key — and it is why the guard in the next trap is not optional.
+
 **The collector still needs its own idempotence guard.** The composite key changes for reasons
 unrelated to the work — a duration correction arriving late will re-fire it for the same item. Each
 branch above therefore re-checks that the result it would produce is still missing
@@ -87,11 +106,29 @@ always a no-op, and leaves the fast flow undamped. The gate belongs on the merge
 
 ## Verifying it
 
-Instrument the gate, not the collector: log the composite key on every emission that gets *past*
-`distinctUntilChanged`. Then let one item play through without touching anything. The count must be
+Hand-written keys and projected ones need a census each, because the bare no-argument form is not a
+hand-written key and never appears in the first list:
+
+```bash
+grep -rnE 'distinctUntilChanged *\{|distinctUntilChangedBy' --include='*.kt' . | grep -v '/build/'
+grep -rn -A12 -E '^ *\.map \{$' --include='*.kt' . | grep -v '/build/' | grep -E '\.map \{$|distinctUntilChanged\(\)'
+```
+
+From the first, expect a handful of hits (plus an import line per file that uses the `By` form). Read
+each one against the body of its own collector and answer the two questions above in order: does
+`true` mean drop here, and does the key mention every field the body reads? A predicate that compares
+one id while the body reads three fields is the silent-drop defect, invisible at the call site.
+
+The second is where an omitted field actually hides, because a multi-line `.map {` feeding a bare
+`distinctUntilChanged()` *is* a hand-written key with its fields spread over several lines. Only the
+**pairs** in that output count: a `.map {` with no `distinctUntilChanged()` under it is an ordinary
+transformation, so read past it. For each pair, open the projection and ask the second question again.
+
+Then instrument the gate, not the collector: log the composite key on every emission that gets *past*
+`distinctUntilChanged`. Let one item play through without touching anything. The count must be
 small and bounded — one line when the duration becomes known, and nothing for the rest of the item.
 A line every tick means the predicate is inverted or the composite includes a field that changes
-continuously.
+continuously; **no line at all** for a change you know happened is the omitted field.
 
 Then switch items fast, before the first item's work returns, and confirm two things: a new line
 appears for the new item, and no result belonging to the old item is written afterwards. The second

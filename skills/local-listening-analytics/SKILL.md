@@ -1,123 +1,138 @@
 ---
 name: local-listening-analytics
-description: Build per-user listening or usage analytics entirely on-device — an append-only event table plus a denormalized per-contributor table that carries a copy of the timestamp, two completion thresholds instead of one, and bare ids in events enriched to titles and artwork only at read time. Use when adding a "your year in review" or top-items screen without a backend, when a time-window chart is slow, or when a chart is mysteriously shorter than the row count says it should be.
+description: Build per-user listening or usage analytics entirely on-device — an append-only event table plus a denormalized per-contributor table that carries a copy of the timestamp, two completion thresholds instead of one, bare ids in events enriched to titles and artwork only at read time, and every window query parameterised as (start, end) so "last N days" stays an argument. Use when adding a "your year in review" or top-items screen without a backend, when a time-window chart is slow, or when a chart is mysteriously shorter than the row count says it should be.
 ---
 
 # Local analytics with no service behind it
 
-Two tables. The **event** table is the record of what happened; the **contributor** table exists
-only so the "top contributors" query never has to join:
+Two tables. `activity_event` records what happened; `event_entity` — one row per (event,
+contributor) — exists only so the "top contributors" query never has to join:
 
 ```kotlin
-@Entity("playback_event")
-data class PlaybackEventEntity(
+@Entity("activity_event")
+data class ActivityEventEntity(
     @PrimaryKey(autoGenerate = true) val eventId: Long = 0,
     val timestamp: LocalDateTime = now(),
-    val videoId: String = "",
-    val albumBrowseId: String? = null,
-    val durationSecond: Long = 0,
-    val listenedSecond: Long = 0,
+    val itemId: String = "", val groupId: String? = null,
+    val durationSecond: Long = 0, val listenedSecond: Long = 0,
 )
 
 @Entity(
-    tableName = "event_artist",
-    primaryKeys = ["eventId", "channelId"],
-    foreignKeys = [ForeignKey(
-        entity = PlaybackEventEntity::class,
-        parentColumns = ["eventId"], childColumns = ["eventId"],
-        onDelete = ForeignKey.CASCADE,
-    )],
-    indices = [Index("eventId"), Index("channelId"), Index("timestamp", "channelId")],
+    tableName = "event_entity", primaryKeys = ["eventId", "entityId"],
+    foreignKeys = [ForeignKey(ActivityEventEntity::class, ["eventId"], ["eventId"], onDelete = CASCADE)],
+    indices = [Index("eventId"), Index("entityId"), Index("timestamp", "entityId")],
 )
-data class EventArtistEntity(val eventId: Long, val channelId: String, val timestamp: LocalDateTime)
+data class EventEntityRow(val eventId: Long, val entityId: String, val timestamp: LocalDateTime)
 ```
 
-One item can have several contributors, so the second table is one row per (event, contributor).
-Both rows are written in a single transaction, the child taking the id the parent insert returned:
+One item can have several contributors, so the second table is one row per (event, contributor),
+written in the same transaction and taking the id the parent insert returned:
 
 ```kotlin
-@Transaction
-suspend fun insertPlaybackWithArtists(...): Long {
-    val timestamp = now()
-    val eventId = insertPlaybackEvent(PlaybackEventEntity(timestamp = timestamp, ...))
-    channelIds.forEach { insertEventArtist(EventArtistEntity(eventId, it, timestamp)) }
+@Transaction suspend fun insertEventWithEntities(...): Long {
+    val timestamp = now()      // ONE read of the clock, shared by both rows
+    val eventId = insertActivityEvent(ActivityEventEntity(timestamp = timestamp, ...))
+    entityIds.forEach { insertEventEntityRow(EventEntityRow(eventId, it, timestamp)) }
     return eventId
 }
 ```
 
 ## Traps
 
-**Leaving the timestamp off the child row forces a join on the hottest query you have.** Every
-window in this feature is `WHERE timestamp BETWEEN :start AND :end`. With the copy, the top-
-contributors query never touches the parent table at all:
+**Leaving the timestamp off the child row forces a join on the hottest query you have.** Every window
+here is `WHERE timestamp BETWEEN :start AND :end`; with the copy, the top-contributors query never
+touches the parent table at all:
 
 ```sql
-SELECT channelId, COUNT(*) AS playCount FROM event_artist
+SELECT entityId, COUNT(*) AS playCount FROM event_entity
 WHERE timestamp BETWEEN :startTimestamp AND :endTimestamp
-GROUP BY channelId ORDER BY playCount DESC LIMIT 100
+GROUP BY entityId ORDER BY playCount DESC LIMIT 100
 ```
 
-The duplication is safe precisely because events are **append-only**: nothing ever edits a
-timestamp, so the copy cannot drift. Write both from the same local variable inside the
-transaction — reading the clock twice puts the two rows in different windows at a boundary.
+The duplication is safe because events are **append-only**: nothing edits a timestamp, so the copy
+cannot drift. Both come from one local variable — reading the clock twice straddles a boundary.
 
-**Index the pair the query actually filters and groups on, not each column separately.** The
-composite `Index("timestamp", "channelId")` is what makes the window scan cheap; the `eventId`
-index serves the foreign key and its cascade. Adding single-column indices instead looks
-thorough and does not help this query.
+**Index the pair the query filters and groups on, not each column separately.** The composite
+`Index("timestamp", "entityId")` makes that scan cheap; `eventId` serves the foreign key and its
+cascade. Single-column indices instead look thorough and do not help.
 
-**One threshold is not enough — you need a floor and a ceiling.** A play should not count at all
-until the user has heard enough of it to mean something, and past a certain point it should count
-as the whole thing rather than as the exact seconds:
+**One threshold is not enough — you need a floor and a ceiling.** A play should not count until the
+user has heard enough of it to mean something, and past a point it should count whole:
 
 ```kotlin
-val percent = currentPositionMillis / (song.durationSeconds * 1000f)
+val percent = currentPositionMillis / (item.durationSeconds * 1000f)
 if (percent < 0.2f) return                         // too little: no event at all
-val listened = if (percent >= 0.8f) song.durationSeconds.toLong()   // near the end: count it whole
+val listened = if (percent >= 0.8f) item.durationSeconds.toLong()   // near the end: count it whole
                else currentPositionMillis / 1000
 ```
 
-Without the floor, every skip is an event and the top-items chart becomes a chart of what the user
-skipped past. Without the ceiling, a user who leaves before the last few seconds — which is almost
-everyone — never records a complete listen, and total-time figures read low forever. Tune the two
-numbers, but keep both.
+Without the floor, every skip is an event and the top-items chart charts what the user skipped past.
+Without the ceiling, anyone leaving before the last few seconds — almost everyone — never records a
+complete listen and total-time reads low forever. Tune both, keep both.
 
-**Store bare ids in the event; resolve them to titles and artwork at read time.** The event table is
-the one that grows without bound, so every extra column is paid for thousands of times. Titles and
-cover art also change, and a copy taken at play time slowly turns into a table of names that no
-longer match anything. Keep the projections id-shaped:
+**Store bare ids in the event; resolve them to titles and artwork at read time.** The event table
+grows without bound, so every extra column is paid for thousands of times — and titles and artwork
+change, so a copy taken at write time becomes a table of names matching nothing. Keep projections
+id-shaped: `(itemId, playCount, totalListeningTime)`, `(entityId, playCount)`. A projection is
+hand-written, so it is also where a converted column loses its converter
+(`stored-timestamp-is-a-local-wall-clock`).
+
+**Enrichment quietly shortens the chart.** The natural join back to display data is
+`mapNotNull { repository.getById(it.id) ?: return@mapNotNull null }` — every id whose row was since
+deleted disappears, and a "top 100" becomes a top 60 with no error and no gap in the numbering.
+Decide the policy per list: this codebase drops unknown tracks, but for contributors fetches first.
+
+**Cap in SQL, not in Kotlin.** `LIMIT 100` in the query means the database sorts and discards;
+`.take(100)` after the fact materializes, converts and boxes every row first. At a few thousand
+events that is invisible, which is why the wrong one survives until it is not. But the cap belongs to
+the *consumer*: once the same grouped query feeds a share-of-the-whole, the cut tail inflates it —
+`unbounded-for-shares-capped-for-lists` is a second query with no `LIMIT`, not a merge.
+
+**Parameterise the window from the start; "last N days" is an argument, not a query.** The first
+screen only ever asks for the last 7, 30 or 90 days, so the obvious method is
+`queryTopItemsLastXDays(n)` over a `timestamp > :cutoff` query. Write the general form instead:
 
 ```kotlin
-data class TopPlayedTracks(val videoId: String, val playCount: Int, val totalListeningTime: Long)
-data class TopPlayedArtist(val channelId: String, val playCount: Int)
+// adapted — the only place "last X days" exists; there is no LastXDays SQL anywhere
+suspend fun queryTopItemsLastXDays(x: Int) =
+    databaseDao.queryTopItemsInRange(startTimestamp = now().beforeXDays(x), endTimestamp = now())
 ```
 
-**Enrichment quietly shortens the chart.** The natural way to join ids back to display data is
-`mapNotNull { repository.getById(it.id) ?: return@mapNotNull null }` — and every id whose row was
-since deleted disappears from the result. A "top 100" becomes a top 60 with no error and no gap in
-the numbering. Decide the policy per list and make it explicit: this codebase drops unknown tracks,
-but for contributors it falls back to a fetch before giving up. Whichever you choose, **verify by
-comparing the returned list size against the count query** — if they differ, enrichment ate the
-difference.
+Measured here: **zero** `LastXDays` queries in the DAO against twelve `…InRange` ones — so when a
+period navigator arrived much later (arbitrary spans, stepping backwards, every period compared
+against the one before) the top lists needed no new query, datasource or repository method. It was a
+different argument. One extra parameter the day you write it is the difference between a feature and
+a migration the day you need it; coherence is the part it *did* need
+(`one-snapshot-per-period-not-many-flows`).
 
-**Cap in SQL, not in Kotlin.** `LIMIT 100` inside the query means the database sorts and discards;
-`.take(100)` after the fact means every matching row is materialized, converted and boxed first. At
-a few thousand events the difference is invisible, which is exactly why the wrong one survives to
-the point where it is not.
-
-**Aggregate over the source rows, not over rows you already grouped.** Counting plays is
-`COUNT(*)`; total time is `SUM(listenedSecond)`. Computing either in Kotlin from a page of events
-gives the answer for that page only, and paged readers (`LIMIT`/`OFFSET`) are exactly what these
-tables invite.
-
-**Skip null grouping keys explicitly.** `albumBrowseId` is nullable, and a `GROUP BY` over it
-produces a real "no album" bucket that outranks every actual album. The query says
-`AND albumBrowseId IS NOT NULL` for that reason.
+**Aggregate over the source rows, and skip null grouping keys explicitly.** Counting plays is
+`COUNT(*)`, total time `SUM(listenedSecond)`; computing either in Kotlin from a *page* of events
+answers for that page only, and paged readers are what these tables invite. And `groupId` is
+nullable, so a `GROUP BY` over it makes a real "no group" bucket outranking every actual group —
+hence `AND groupId IS NOT NULL`.
 
 **Give the user an off switch and a delete path, and check the switch at the write site.** Events
 accumulate forever otherwise. The gate belongs where the event is created — one preference read
-before doing any work — and the delete paths are worth having in two shapes: a bounded prune
-(`DELETE FROM playback_event WHERE timestamp < :cutoff`) and a full clear. The cascade on the child
-table means clearing the parent clears both; a child table with no cascade would be left holding
-every row you thought you deleted. **Verify the cascade** by counting both tables before and after,
-not by reading the annotation.
+before any work — and deletes want two shapes: a bounded prune (`DELETE FROM activity_event WHERE
+timestamp < :cutoff`) and a full clear. The cascade means clearing the parent clears both; without
+one the child holds every row you thought you deleted. Note what the prune costs elsewhere: "first
+ever seen" from `MIN(timestamp)` now means *first since the cutoff*
+(`first-ever-not-first-in-window`).
+
+## Verifying it
+
+1. **Confirm the window is a parameter, not a query shape** — 0 and 12 here. A `LastXDays` hit in a
+   DAO is a second query someone must generalise later; above the DAO it is the shortcut calling the
+   range form, which is what you want:
+
+   ```bash
+   grep -rn "LastXDays" --include='*Dao*.kt' . | grep -v '/build/' | wc -l
+   grep -rn -E "suspend fun (get|query)[A-Za-z]*InRange" --include='*Dao*.kt' . | grep -v '/build/' | wc -l
+   ```
+
+2. **Verify the cascade by counting, not by reading the annotation.** Run
+   `SELECT (SELECT COUNT(*) FROM activity_event), (SELECT COUNT(*) FROM event_entity);` either side
+   of a parent delete; a child count that does not move is a cascade that is not there.
+
+3. **Compare each enriched list's size against its own count query** — a "top 100" rendering 60 rows
+   while the count disagrees is enrichment eating the difference, and the only detection for it.

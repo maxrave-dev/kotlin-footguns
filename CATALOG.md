@@ -22,7 +22,7 @@ Legend per row: `skill-name` — one-line gloss — primary evidence — A/B/C �
 10. `upstream-lib-bug-workaround-template` — how to write a workaround for a bug in a lib you can't patch: named tradeoffs, a graceful escape hatch, an explicit removal condition; usage-pattern (not code) is what exposes it — CLAUDE.md — A [docs,git]
 11. `macos-lsenvironment-path-pin` — env via Info.plist pins PATH to the bare four dirs; audit ProcessBuilder first — MEMORY_TUNING.md — A [docs]
 
-## B · Desktop packaging / CI / build (12)
+## B · Desktop packaging / CI / build (13)
 12. `conveyor-desktop-packaging` — HOCON swallows a misplaced key silently; url-schemes binds at AppConfig level; `-K<dotted.key>=<value>` overrides (brackets are for LIST values, not dotted keys; spaced keys need HOCON quoting); per-machine JDK; LSEnvironment PATH — conveyor.conf — A [git,docs,code]
 13. `config-fails-open-verify-artifact` — verify a config-driven feature against the *generated artifact*, diff two builds that differ only in key placement — CLAUDE.md — A [git,docs]
 14. `desktop-deep-link-plumbing` — argv filter must match any `scheme://`; `.desktop` needs every handler; manual paste fallback — App.kt/DesktopApp.kt — A [docs,code]
@@ -103,7 +103,7 @@ Legend per row: `skill-name` — one-line gloss — primary evidence — A/B/C �
 79. `custom-thin-media-slider` — thin track + buffered indicator; the M3-alpha valueRange overload gotcha (use 0..1) — FullscreenPlayer.kt:536 — B [ui]
 80. `custom-modal-sheet-family` — transparent container, zeroed insets + end spacer, hide-then-dismiss — ModalBottomSheet.kt — B [gaps]
 
-## H · Compose/CMP UI — screens, navigation, adaptive (7)
+## H · Compose/CMP UI — screens, navigation, adaptive (8)
 81. `responsive-gate-size-not-platform` — gate on wDP<hDP; one boolean must not answer two questions; aspectRatio/ContentScale/scrim all change together — Album/Artist screens — A [docs,git,code]
 82. `nav-tab-registration-drift` — several nav surfaces each hold the tab list; enum ordinal is identity not position — AppBottomNavigationBar.kt — A [docs,code]
 83. `type-safe-nav-graph-organization` — @Serializable route files, nested graphs as extension fns, one transition set, route-level theming wrap — AppNavigationGraph.kt — B [ui]
@@ -194,3 +194,105 @@ Legend per row: `skill-name` — one-line gloss — primary evidence — A/B/C �
 - Notion SecondBrains (owner's second brain) — connector not yet authorized
 - AdapterItems.kt home-feed item catalog; dialog family; AnalyticsScreen chart rendering
 - SharedViewModel ~320-2057; Artist/Song/Stream repository bodies
+
+## Batch 6 — delta mined 2026-08-24 (76 new · 20 updated)
+
+> Mined from the source project's continued development after the original 140 shipped: 10 write lanes → 10 adversarial verify lanes → 7 fix lanes, same quality bar and the same anonymity rules. Grouped below by mining cluster; the trailing letter is the A–N taxonomy above.
+
+**Shared sessions — bridge, roles and intent (10)**
+141. `sync-room-bridge-echo-guard` — one bridge, direction decided by role; a flag held across the apply stops a remote command's local side effect being published straight back — D
+142. `play-intent-decided-before-load` — decide whether and where the item starts before building it, instead of loading with a hardcoded "start playing" and correcting a moment later — D
+143. `intent-flag-not-observed-state` — a component committed to running still reports "not running"; anything meaning intent reads the intent flag, and waits for it with a timeout rather than sampling inline — D
+144. `server-default-overrides-client-intent` — a relay stamps its own default onto fields your command left unset, so a follower obeying it verbatim stops the thing it just loaded — D
+145. `position-based-group-sync` — publish the playhead with every command, correct for flight time, seek only past a tolerance — never make everyone wait for the slowest member — D
+146. `joiner-catches-up-by-asking` — pushed state is the source's last command replayed, so its position is however old that command is; ask for the live position on arrival — D
+147. `follower-transport-stays-local` — a follower owns its own stop button: pausing is local and silent, and resuming asks where the group is now rather than restoring where this device stopped — D
+148. `runtime-override-not-preference-write` — disable a feature for the duration of a mode with a runtime override, never by writing the stored preference a process death would make permanent — D
+149. `derive-seek-from-progress-flow` — detect a scrub as a playhead that moved further than wall-clock time allows; the platform's own discontinuity callback exists on one backend only — D
+150. `follower-item-built-from-shared-payload` — build the follower's item from the payload the session carries, not by re-resolving locally: a shape-based guess picks the wrong rendition and a per-item round trip wedges the collector — D
+
+**Wire protocol, clocks and session lifecycle (7)**
+151. `monotonic-clock-offset-sync` — take the peer's processing time out before halving the round trip, weight samples against the best trip seen, and insist the local source is monotonic — L
+152. `readiness-barrier-needs-every-answer` — answer a group barrier on bufferedness rather than on playing, answer only when actually named, and accept that one member who never answers freezes everyone — D
+153. `protobuf-without-codegen-kmp` — annotate ordinary data classes with field numbers instead of generating a JVM-only code layer; one encoder setting decides whether the bytes match — L
+154. `borrowed-wire-protocol-discipline` — a protocol someone else defined is not yours to improve: no renaming, no reordering, omitted constants read off the counterpart, unknown types decoded to null — L
+155. `websocket-session-handshake-lifecycle` — reader started before the first message because the answer returns through it, handshake settled on a deferred with a timeout, close frame sent non-cancellable — L
+156. `publish-a-snapshot-on-taking-the-role` — every publisher is edge-triggered, so whoever was already running when they took the role emits nothing; publish a full snapshot on becoming the source — L
+157. `pending-state-makes-waiting-legible` — model "asked, and not yet answered" as its own field, or a refusal and a peer who never looked are indistinguishable — I
+
+**One curve, two engines — filters, presets and profile import (10)**
+158. `filter-chain-two-owners-one-writer` — two features wanting entries in one whole-chain property need per-feature fields, a single writer, and a clear that drops only its own tier — D
+159. `identity-compare-immutable-setting` — bundle a multi-field setting into one immutable value behind a supplier, so a hot consumer asks "changed?" once and can never see the fields half-updated — M
+160. `sampled-supplier-vs-per-handle-reapply` — one backend samples a shared field per buffer and needs no push; the other starts every handle blank and needs an explicit re-apply at each creation site — D
+161. `one-setting-two-backends` — define the centres, width and range once and verify both backends against a reference implementation rather than by ear — D
+162. `preset-identity-read-back-from-value` — derive "which preset is this" by comparing against the value in force instead of storing a label, so editing drops to Custom and returning re-selects — I
+163. `remote-index-cached-as-rows-with-validator` — parse a large published index into indexed rows once and re-check with the server's own validator; a 200 that parses to nothing is a failure, not a refresh — J
+164. `control-range-must-cover-stored-values` — size a slider from the real distribution it will be handed, because an out-of-range value parks the thumb at the end while the readout shows a different number — G
+165. `removing-a-feature-audit-shared-handles` — before deleting a feature, audit what else uses the handle it appeared to own, delete the other platforms' no-op stubs, and force-stop before judging the result — N
+166. `edit-a-shape-as-a-shape` — when the value is a curve, draw a draggable curve rather than N sliders: raw pointer loop, one commit per gesture, smoothing that never overshoots a placed handle — G
+167. `optional-engine-feature-degrade-in-tiers` — an engine rejects the whole chain when one stage is unknown, so retry without the optional stage and report which tiers were accepted — D
+
+**A screen with two looks — shell, content and the rules between them (11)**
+168. `screen-shell-content-split` — split a screen into a shell owning every cross-look concern and a content layer that only renders, connected by a state snapshot and an actions bag — H
+169. `variant-layout-math-stays-in-the-variant` — keep a fit-one-screen measurement per look instead of hoisting one, and mirror the invisible spacer to the ratio actually drawn — H
+170. `hoist-the-flag-not-the-animation` — share the boolean that drives a fade, never the tween that runs it, so one look can go asymmetric without changing how the other feels — G
+171. `dont-pre-animate-a-self-animating-property` — a component that animates a property itself ignores new targets mid-flight, so an externally tweened value freezes it part-way — G
+172. `progress-indicator-as-scrubber` — build a seek control from an indicator plus a transparent pointer layer: taller hit box, drags consumed so an ancestor pager cannot steal the scrub — G
+173. `restricted-marker-is-not-an-opt-in` — tell an opt-in marker from a restricted-to marker before adding suppressions; only the first is compiler-enforced, and both coexist in one library — M
+174. `artwork-seeded-dynamic-scheme` — derive a whole tonal scheme from one extracted seed and wrap only that subtree, tweening the seed rather than the scheme — F
+175. `a-stated-rule-needs-annotated-exceptions` — a rule with legitimate exceptions rots unless every exception carries its reason at the call site and the rule itself is greppable — N
+176. `scoped-composable-shadows-the-top-level-one` — inside a layout scope a same-named scope extension wins silently, so a call written for the plain version gets the scoped one's defaults — G
+177. `settings-value-round-tripped-through-its-label` — mapping a chosen localized label back to a stored value breaks the day two labels translate identically; carry the id, and make the miss loud — G
+178. `self-hiding-child-cannot-hide-its-slot` — a component that renders nothing cannot remove the container someone else wrapped it in; gate the slot on the same published predicate — G
+
+**Charts that refuse to lie (7)**
+179. `self-normalised-axes-need-a-second-shape` — self-normalised axes need one guarded denominator each and a second polygon, because a lone shape on them says nothing — G
+180. `dont-slice-one-circle-between-unrelated-measures` — measures sharing no whole go on concentric arcs, capped short of 360°, drawn over a full-ring track — G
+181. `delta-absent-not-infinite` — render a change against an empty baseline as nothing at all: never +100%, never an infinity, never a saturated integer — G
+182. `partial-chart-must-say-so` — print the share of input the distribution could classify, computed with the same predicates that built the buckets, and keep that line reachable at zero coverage — G
+183. `equal-buckets-or-no-buckets` — buckets of exactly equal width with the remainder falling outside; a partial newest bucket must never be drawn at full width — G
+184. `mosaic-arrangements-must-be-hole-free` — a ranked mosaic needs an arm for every count, so no entry is silently dropped and no arrangement leaves an empty rectangle — G
+185. `empty-state-must-keep-its-navigation` — replacing a populated header with an empty-state message must not delete the controls that header owned, or the user cannot get back out — H
+
+**Time, windows and shares in the query layer (8)**
+186. `stored-timestamp-is-a-local-wall-clock` — a converter-written timestamp can hold local time encoded as UTC; declaring a projection field as a raw number opts out of the converter and applies the offset twice — E
+187. `bucket-local-time-in-code-not-in-sql` — the engine's local-time modifier answers from the process time zone, and four local-time aggregates mean four scans that can disagree — E
+188. `one-snapshot-per-period-not-many-flows` — return a period's figures as one immutable snapshot from a single suspend call; separate emissions let this period's count render beside last period's total — I
+189. `unbounded-for-shares-capped-for-lists` — a top-N query is right for a list and wrong for a share of the whole, because the cut tail shrinks the denominator invisibly — E
+190. `first-ever-not-first-in-window` — take MIN over the entity's whole history and ask whether it lands inside the window; filtering first and grouping after calls every entity new — E
+191. `palette-state-parks-on-loading` — a generator that flips to Loading before its own suspension point reports no colour for the whole generation, and a cancelled one never restarts — F
+192. `string-resource-format-limits` — the multiplatform formatter substitutes plain positional placeholders and nothing else, so padding, rounding and units belong in code — M
+193. `inclusive-period-boundaries-and-offset-reset` — hold one boundary convention everywhere, and reset the step offset whenever the granularity changes — E
+
+**Effects, indication and transitions (8)**
+194. `event-not-state-edge-for-one-shot-effects` — fire a one-shot effect from the click that caused it; an effect watching a boolean edge cannot tell a tap from data arriving a beat later — G
+195. `draw-outside-bounds-particle-modifier` — draw modifiers are unclipped by default, so the modifier must sit before every clip in the chain, and reach scales off the host's measured size — G
+196. `image-fallback-url-retry-in-composition` — hold the URL in composition state and swap it once in onError; the cache key must follow the mutated URL and the swap must be a no-op the second time — G
+197. `text-brush-shimmer-sweep` — put the moving gradient on the text style itself so glyphs are painted by the brush; declare the infinite transition unconditionally or it restarts on every appearance — G
+198. `touch-indication-bounds-and-alpha` — soften a ripple by alpha alone and give it the right bounds; clip must precede clickable, and a card and its clip need one shape value — G
+199. `crossfade-container-sizes-to-the-visible-child` — the container is a top-start Box sized to the largest composed child, so a thin child pins to the top mid-transition and drops when the tall one leaves — G
+200. `slide-transition-defaults-to-half-a-height` — a vertical slide defaults to half the element's height, so it starts already halfway and reads as a pop — G
+201. `transparent-chip-selection-signals` — a shadow under a transparent shape shows through as a dark ring, and zeroing resting elevation does not remove it: each interaction state carries its own token — G
+
+**Measurement, insets and commit points (5)**
+202. `weight-fill-false-to-center-a-cluster` — a weighted child occupies its whole slot even when narrower, pinning its sibling to the far edge; releasing the unused width is two edits, not one — G
+203. `stacked-bars-double-consume-window-insets` — inset consumption reaches descendants and never siblings, so two stacked inset-aware bars each reserve the system bar — H
+204. `lazy-item-grouping-beats-arrangement-gap` — a list's spacing applies between every pair and compounds with each item's own padding, so a block that reads as one unit belongs in one item — G
+205. `floating-overlay-reserves-its-own-strip` — a floated control takes part in no measurement, so every scrolling branch must reserve the strip it covers explicitly — H
+206. `commit-a-text-field-on-an-explicit-action` — writing on focus loss stores whatever was half-typed when a dialog or a stray tap took focus; keep the draft keyed on the stored value — G
+
+**Theming a shell that is not the default (5)**
+207. `gate-optional-effect-at-the-shared-primitive` — put the on/off setting inside the one primitive that draws the effect; the off path keeps the shape and hit target and changes only the paint — F
+208. `shell-background-is-not-scheme-background` — the moment panels stop using the scheme background, every gradient and scrim converging on it ends on a hard seam — F
+209. `flat-twin-shares-geometry-not-material` — when a setting picks between an expensive rendering and a plain twin, every geometry decision must be mirrored: the compiler cannot pair two constants in two files — F
+210. `chrome-drawn-outside-the-theme-scope` — a title bar, splash or crash dialog composed as a sibling of the theme reads the framework default scheme, light always, and nothing errors — F
+211. `ambient-tone-layer-behind-flat-pages` — a reusable top-glow emitted as the first sibling of a destination's content; a null tone must collapse into the page colour, not substitute a theme colour — F
+
+**Platform surfaces and data-layer reach (5)**
+212. `two-vendors-one-package-kmp-api-skew` — two vendors shipping one package name at different versions into different source sets make an import that compiles for one target and fails for the other — C
+213. `remoteviews-bitmap-budget` — every bitmap crosses a process boundary against a fixed budget, so decoding at draw size is what keeps the widget on screen, not an optimisation — K
+214. `glance-layout-vocabulary` — the widget toolkit has no aspect ratio, weight is always 1, corner radius applies only from a later API, and the cell's spare height must be spent deliberately — K
+215. `search-over-a-paged-list-queries-the-source` — filtering a paging stream only searches the pages already loaded; the search must query the store and render as a sibling overlay — J
+216. `mirror-local-state-to-a-remote-account` — an opt-in mirror back-fills on enable, deliberately does not undo on disable, and reports three values so "not attempted" differs from "failed" — J
+
+**Updated in batch 6 (20):** `changelog-as-war-story` · `commit-archaeology-red-flags` · `compose-multiplatform-viewmodel-base` · `expect-actual-composable-capability` · `flatmaplatest-resubscribe-composite-key` · `force-dark-immersive-subtree` · `glance-widget-over-existing-state` · `import-format-contract-design` · `koin-viewmodel-scoping-traps` · `liquid-glass-backdrop` · `local-listening-analytics` · `material-symbols-icon-system` · `media3-custom-audio-processor` · `nav-tab-registration-drift` · `nested-flag-settings-auto-disable` · `realtime-biquad-dsp` · `response-to-domain-flow` · `responsive-gate-size-not-platform` · `retry-needs-backoff-and-cap` · `unknown-not-a-valid-score`

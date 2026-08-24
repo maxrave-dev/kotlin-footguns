@@ -74,6 +74,24 @@ store synchronously to seed a field (`runBlocking { store.value.first() }`) is t
 and shows up in screen models and service handlers alike. It is tolerable exactly once, for a value
 that genuinely must exist before the first frame; a base class multiplies it by every screen.
 
+**The worst position for such an accessor is composition, not construction.** An initializer blocks
+once per screen; a blocking getter read from a composable blocks on **every recomposition**, on the
+frame thread, for as long as the screen is open — and at the call site it looks like a field. Publish
+the read as a flow beside it, collect it once at the top of the screen, and pass a plain value down —
+under a shared shell, as a state-holder field nothing below can bypass (`screen-shell-content-split`):
+
+```kotlin
+// adapted — the two forms side by side, the second comment condensed to one line
+fun isUserLoggedIn(): Boolean = runBlocking { dataStoreManager.cookie.first().isNotEmpty() }
+// Flow-based variant so composables collect login state once instead of blocking in composition.
+fun isUserLoggedInFlow(): Flow<Boolean> = dataStoreManager.cookie.map { it.isNotEmpty() }
+```
+
+**Scope that fix to the composition path; do not chase every call site.** The blocking form is fine
+from a lifecycle callback or a coroutine — the two that survive here are read in `onDestroy` and once
+at startup, so converting them buys a wide diff and nothing else. The leftover worth acting on is the
+opposite one: three of the five blocking accessors here now have no caller at all.
+
 **Cancelling `viewModelScope` in `onCleared` is redundant.** Take the runtime apart: `viewModelScope`
 is a closeable scope registered on the ViewModel, and clearing the ViewModel closes it, which
 cancels it. The extra `viewModelScope.cancel()` changes nothing. Harmless here — but the same line
@@ -88,9 +106,8 @@ fails intermittently, on whichever field happened not to be assigned yet. Prefer
 the subclass calls explicitly.
 
 **Property initialization order inside the base is real too.** Initializers run in declaration order,
-and an `init {}` block runs in its position among them — so a block placed above a state field
-cannot read that field. Launching a coroutine there is safe (it resumes later); reading a value is
-not.
+and an `init {}` block runs in its position among them — so a block placed above a state field cannot
+read that field. Launching a coroutine there is safe (it resumes later); reading a value is not.
 
 **Container-awareness is a loosened contract, not a free one.** `by inject()` moves a dependency out
 of the constructor, which means it is no longer visible to a test that constructs the class directly
@@ -112,3 +129,12 @@ thread and blocks nothing anyone can see.
 
 For the base contract itself, construct one subclass directly, with no container configured. If it
 throws, a `by inject()` member is on the constructor path and the base has made itself untestable.
+
+Then audit the blocking accessors: a caller inside a `@Composable` is the per-frame case, and a
+declaration with no caller at all is dead weight. Read each hit's receiver first: a same-named
+member on another class prints as a caller, and narrowing to `\.<name>\(` does not exclude it.
+
+```bash
+grep -rnE "fun [A-Za-z]+\(\): [A-Za-z]+ = runBlocking" --include='*.kt' --exclude-dir=build .
+# then per name printed above: grep -rn "<name>" --include='*.kt' --exclude-dir=build . | grep -v "fun "
+```

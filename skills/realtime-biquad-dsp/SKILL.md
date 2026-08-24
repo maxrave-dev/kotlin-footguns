@@ -1,6 +1,6 @@
 ---
 name: realtime-biquad-dsp
-description: Build a small real-time IIR filter (low-pass / high-pass) in pure Kotlin from the audio-EQ-cookbook formulas, with cascaded sections for a steeper slope, independent state per channel and lazy coefficient recompute. Use when a sweepable filter is needed inside an audio callback, when a stereo filter collapses the stereo image, when the filter output is silence or NaN, or when sweeping the cutoff produces ticks.
+description: Build a small real-time IIR filter in pure Kotlin from the audio-EQ-cookbook formulas — low-pass, high-pass, or a bank of peaking sections — with cascaded stages for a steeper slope, independent state per channel, neutral stages that keep the state size fixed, and lazy coefficient recompute. Use when a sweepable filter is needed inside an audio callback, when a stereo filter collapses the stereo image, when the filter output is silence or NaN, or when sweeping a cutoff or dragging a band produces ticks.
 ---
 
 # A real-time biquad in pure Kotlin
@@ -57,11 +57,44 @@ cutoff you set is no longer the −3 dB point, so a comment reading "4th-order B
 the next reader looking for a bug that is not there. Verify the response rather than the label:
 feed a sine at the cutoff and compare its output amplitude to a sine well inside the passband.
 
+**Keep every stage in the chain at neutral gain — do not skip it.** In a bank of peaking sections it
+is tempting to build only the bands the user moved. Then every adjustment resizes the coefficient
+array *and the state array with it*, and a resized state array is a cleared one: the delay lines
+vanish mid-stream and the user hears a click on every drag. With `A = 10^(gainDb/40)`:
+
+```
+b = [1 + alpha*A, -2*cos(w0), 1 - alpha*A]      a = [1 + alpha/A, -2*cos(w0), 1 - alpha/A]
+```
+
+At 0 dB, `A` is exactly `1`, so `alpha*A` and `alpha/A` are the same number and `b` equals `a`
+term for term. After normalising by `a0`, `b0` is `(1+alpha)/(1+alpha)` — exactly `1.0` in IEEE
+754 — and `b1 == a1`, `b2 == a2`:
+
+```
+0 dB → [1.0, -1.8951700997919003, 0.9115234478756887, -1.8951700997919003, 0.9115234478756887]
+       b0 is exactly 1.0: True | b1 is a1: True | b2 is a2: True
+```
+
+So `H(z) ≡ 1` and the array sizes depend only on the format. It is not *bit*-identical: accumulating
+left to right does not cancel exactly. Over 200 000 random samples from cleared state, one neutral
+stage at the design point above (1 kHz, 48 kHz, Q 1.41) gives `max |y − x|` = `1.0e-14`, some 190 dB
+below the 16-bit LSB; a full ten-stage flat bank gives `1.6e-12`. In the comment claim
+"identity transfer function", not "bit-identical": the second one is checkable and false.
+
+**A centre above half the sample rate gets the identity stage, not a `continue`.** 16 kHz is already
+past Nyquist at 22.05 kHz, which some streams still use — and skipping the band there re-introduces
+the resize you just eliminated, on a subset of streams. Substitute 0 dB and write the stage anyway.
+
+**Entering bypass must clear the history.** Those delay lines were shaped by the *previous* setting,
+so re-enabling with them still in there splices a fragment of the old shape onto the front of the
+new one. It matters even when every stage is neutral, and the figures are setup-specific: seed a
+500 Hz stage (48 kHz, Q 1.41) at +9 dB with a full-scale sine at its centre, then set it to 0 dB and
+feed silence — the residue starts at 1.58 full scale and is still 1.5e-2 two hundred samples later.
+
 **Capture `a0` before you overwrite anything with it.** The normalisation divides all five
 coefficients by the raw `a0`, and `a0` is built from `alpha`, which several formulas also reuse.
-Compute it into its own local, then divide. Doing the division in place, one coefficient at a time,
-in the wrong order, produces coefficients that look plausible and a filter that either goes silent
-or runs away.
+Capture it in a local, then divide: doing it in place, one coefficient at a time, in the wrong
+order, produces plausible-looking coefficients and a filter that either goes silent or runs away.
 
 **Clamp the cutoff into `20 .. (sampleRate / 2 − 1)`.** Past half the sample rate the design has
 no meaning: the recursion stops being stable, the output grows without bound until it overflows

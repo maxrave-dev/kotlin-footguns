@@ -5,13 +5,11 @@ description: Mine a repository's history without being misled by it — an empty
 
 # Commit archaeology: the red flags
 
-History is evidence, but it is evidence written by people who were mid-task and did not know what
-would matter later. Three shapes account for most wrong conclusions drawn from it, and all three
-look ordinary in a one-line log.
+History is evidence written by people who were mid-task and did not know what would matter later.
+Three shapes account for most wrong conclusions drawn from it, all three ordinary in a one-line log.
 
-Before starting: search the repository's tracked prose. A project that keeps a war-story document
-at its root has the reasoning there in a form commit messages never carry, so history is the
-fallback rather than the first stop.
+Before starting, search the repository's tracked prose: a project keeping a war-story document at
+its root has the reasoning in a form commit messages never carry, so history is the fallback.
 
 ## Red flag 1 — the empty-bodied commit
 
@@ -36,16 +34,16 @@ When part of a project lives in a nested repository, a commit that advances it s
 one changed line in its statistics, and this in its diff:
 
 ```
--Subproject commit 4a11e1307c5a0e0909377aba64f885169f4f8b24
-+Subproject commit a4f7e5e11a1addde4cc8ed1ebc759a00b3b4f6c6
+-Subproject commit 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b
++Subproject commit 9f8e7d6c5b4a39281706f5e4d3c2b1a098765432
 ```
 
 The content is entirely in the range between those pointers, in another repository. Expanded:
 
 ```
-Submodule core 4a11e1307..a4f7e5e11:
-  > fix(lyrics): stop dropping the first character when no space follows the timestamp
-  > fix(player): serve cache directly only when the whole track is on disk
+Submodule core 1a2b3c4d5..9f8e7d6c5:
+  > fix(parser): stop dropping the first character after a bare delimiter
+  > fix(cache): serve the local copy only when the whole file is on disk
 ```
 
 Two fixes in another repository, invisible to every ordinary history command run in this one. In
@@ -64,12 +62,15 @@ subject naming two branches. Merges also inflate the population: separate them b
 **Classifying a commit from its subject.** The subject is a label written before the consequences
 were known. Read the statistics for every commit you intend to cite; it costs one command.
 
-**Reading a one-line change as a small change.** A nested-repository pointer move is the extreme
-case; generated files, lock files and version catalogs behave the same way.
+**Reading a one-line change as a small change.** A nested-repository pointer move is the extreme case;
+generated files, lock files and version catalogs behave the same way.
 
-**Blaming into a move commit and stopping.** A relocation rewrites the recorded author of every
-line it touches, so blame lands on whoever moved the folder. Follow the file across the move
-before concluding anything about who wrote what, or why.
+**Counting bumps by their subjects under-counts them, and not slightly.** Most pointer moves ride
+*inside* a feature commit, invisible in the subject and easy to skip in a `--stat` full of source
+files; one that names the bump is the exception. Count by **path** (step 3), on your own window.
+
+**Blaming into a move commit and stopping.** A relocation rewrites the recorded author of every line
+it touches, so blame lands on whoever moved the folder. Follow the file across the move first.
 
 **Assuming a nested repository's history is reachable.** Rendering the range requires that
 repository to be present locally and to contain both pointers. When it is absent, or the range
@@ -91,24 +92,20 @@ not recorded rather than paraphrasing the subject.
 
 ## Verifying it
 
-1. **How much of this history has no body at all** — that fraction tells you how much weight the
-   subjects are carrying:
+1. **How much of this history has no body at all** — how much weight the subjects are carrying:
 
    ```bash
-   git log --all --format='%H%x01%s%x01%b%x02' \
-     | awk 'BEGIN{RS="\002"; FS="\001"} NF>1 && $3 ~ /^[[:space:]]*$/ {n++} END{print n+0}'
+   git log --all --format='%H%x01%s%x01%b%x02' | awk 'BEGIN{RS="\002"; FS="\001"} NF>1 && $3 ~ /^[[:space:]]*$/ {n++} END{print n+0}'
    git rev-list --all --count
    ```
 
-2. **Rank the empty-bodied commits by how much they actually changed**, so the ones whose subject
-   is doing no work are visible:
+2. **Rank the empty-bodied commits by how much they changed**, exposing subjects doing no work:
 
    ```bash
    git log --all --format='%H%x01%s%x01%b%x02' \
      | awk 'BEGIN{RS="\002"; FS="\001"} NF>1 && $3 ~ /^[[:space:]]*$/ {gsub(/^\n/,"",$1); print $1"\t"$2}' \
      | head -400 \
-     | while IFS=$'\t' read -r h s; do
-         printf '%s | %s\n' "$(git show --stat --format='' "$h" | tail -1)" "$s"
+     | while IFS=$'\t' read -r h s; do printf '%s | %s\n' "$(git show --stat --format='' "$h" | tail -1)" "$s"
        done | grep changed | sort -rn | head -12
    ```
 
@@ -116,19 +113,23 @@ not recorded rather than paraphrasing the subject.
    empty-bodied commits, about a third of them here. Raise it until the ranking stops changing;
    left as is, a larger silent commit further back never enters it and the "largest" is wrong.
 
-3. **Find the nested-repository bumps and expand one:**
+3. **Find the nested-repository bumps by path, and expand one** — an unset `SINCE` matches nothing, so set it first:
 
    ```bash
-   cat .gitmodules
-   git log --all --oneline --format='%h %ad %s' --date=short -i --grep='submodule' | head
+   SINCE='6 months ago'                                                   # your window, quoted: it has spaces
+   SUB=($(git config -f .gitmodules --get-regexp '\.path$' | awk '{print $2}'))
+   git log --since="$SINCE" --oneline | wc -l                             # commits in the window
+   git log --since="$SINCE" --format=%h -- "${SUB[@]}" | wc -l            # …carrying a pointer bump
+   git log --since="$SINCE" --format=%s -- "${SUB[@]}" | grep -ciE 'submodule|subproject|bump'
    git show --submodule=log <bump-commit>
    ```
 
-   Pass condition: the expanded output lists real subjects from the nested repository. One line
-   of pointer change means the range did not render, and the investigation is not done.
+   Second over first is how much of the window is invisible from here; third over second is how much
+   of that a subject grep would have found. Treat every commit in list two as a bump whatever its
+   subject says. Pass condition on the last command: real subjects from the nested repository — one
+   line of pointer change means the range did not render, and the investigation is not done.
 
-4. **Separate merges from direct commits before measuring anything, and follow files through
-   relocations rather than blaming the move:**
+4. **Separate merges before measuring, and follow files through relocations rather than the move:**
 
    ```bash
    git log --all --merges --oneline | wc -l
@@ -136,5 +137,4 @@ not recorded rather than paraphrasing the subject.
    git log --follow --format='%h %ad %s' --date=short -- <path>
    ```
 
-5. **Before citing any commit as evidence**, confirm you have read its statistics — and, if it is
-   a nested-repository bump, the expanded range.
+5. **Before citing any commit**, confirm you read its statistics — and, if a bump, the expanded range.

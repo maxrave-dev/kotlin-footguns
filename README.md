@@ -1,11 +1,11 @@
 # kotlin-footguns
 
-140 battle-tested agent skills mapping the footguns of Kotlin, Compose Multiplatform and
+216 battle-tested agent skills mapping the footguns of Kotlin, Compose Multiplatform and
 desktop JVM development. Mined from a production codebase, not written from documentation.
 
 Each skill is a standalone `SKILL.md` in the open agent-skills format, readable by Claude Code
 and any coding agent that understands the format — and just as readable by a human. The corpus
-is 17,000+ lines across 140 files, and in most of them the largest section is **Traps**: the
+is 26,000+ lines across 216 files, and in most of them the largest section is **Traps**: the
 specific ways a technique fails in practice, each paired with a way to verify the failure and
 the fix on your own tree.
 
@@ -57,6 +57,7 @@ generic core that applies to whichever API you are consuming.
 | L | 12 | Consuming remote APIs: clients, parsing, auth flows, retries |
 | M | 10 | Kotlin and multiplatform utilities and language traps |
 | N | 7 | Engineering method: experiments, logs, changelogs, migrations |
+| Δ | 76 | Batch 6: sync rooms, equalizer and profile import, player style system, analytics, UI effects and platform lessons |
 
 The full annotated index, with one line per skill and its primary evidence, is in
 [CATALOG.md](CATALOG.md).
@@ -82,7 +83,9 @@ Extraction ran as a five-batch pipeline, and no file shipped as first drafted. E
 reviewed by independent adversarial lanes that received only the files and the source tree —
 never the author's reasoning — and were instructed to refute, not confirm. Findings were
 repaired in separate fix lanes, and a repair was accepted only with the re-run evidence
-attached.
+attached. A follow-up delta batch, mined later from the source project's continued
+development, went through the same pipeline at wider fan-out: ten write lanes, ten adversarial
+verify lanes and seven fix lanes.
 
 The bar tightened as the project ran. By the final batches, every command in every
 "Verifying it" section had to be executed verbatim against the source tree before shipping —
@@ -95,7 +98,7 @@ evidence throughout; anything sourced only from prose is marked as such in the f
 In the final two batches alone this review raised close to thirty blocking findings — among
 them verification steps that passed on defective code and prescribed fixes that did not fix
 the case they named — every one repaired or refuted with recorded evidence before release. A
-closing sweep re-checked all 140 files for identifier leaks, structural consistency and
+closing sweep re-checked all 216 files for identifier leaks, structural consistency and
 cross-reference integrity, and confirmed the catalog matches the folders one to one in both
 directions.
 
@@ -121,7 +124,7 @@ Updates arrive with `/plugin marketplace update maxrave`.
 npx skills@latest add maxrave-dev/kotlin-footguns
 ```
 
-The installer lets you pick which of the 140 skills to take and which agents to install them
+The installer lets you pick which of the 216 skills to take and which agents to install them
 for — Claude Code, Cursor, Codex, Copilot, Windsurf, Gemini and others. The files land in
 your repository as ordinary markdown you own and can edit; nothing updates behind your back.
 Pull newer versions when you want them with `npx skills update`.

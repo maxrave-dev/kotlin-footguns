@@ -20,11 +20,10 @@ abstract class BaseViewModel :
 }
 ```
 
-This is concise and it works: every subclass gets the shared dependency without threading it
-through a dozen constructors, and the container definitions stay short. The cost is exact — **the
-dependency disappears from the constructor**. Reading a subclass's signature no longer tells you
-what it touches, a test must stand up a container instead of passing a fake, and one more
-`by inject()` in the base silently adds a dependency to every view model in the app.
+It works, and it is concise: every subclass gets the shared dependency without threading it through
+a dozen constructors, and definitions stay short. The cost is exact — **the dependency disappears
+from the constructor**: a subclass's signature no longer says what it touches, a test must stand up
+a container rather than pass a fake, and one `by inject()` in the base adds one to every view model.
 
 The defensible split: dependencies **every** subclass genuinely uses go in the base; anything a
 subset needs stays a constructor parameter. Re-grep the base class periodically — the list only grows.
@@ -40,10 +39,10 @@ plugin) generates a module — it does not register anything by itself. If that 
 never passed to the container, **everything still compiles**, the symbol processor still runs, and
 not one definition exists at runtime.
 
-The failure mode is entirely runtime and entirely partial: annotated classes that also have a
-hand-written definition work, annotated classes that do not fail at the first resolve, and classes
-obtained through the platform's own factory never notice. That combination is why it can sit in a
-codebase for months — everything anyone actually opened happened to be in the hand-written module.
+The failure is entirely runtime and entirely partial: annotated classes that also have a
+hand-written definition work, those that do not fail at the first resolve, and classes obtained
+through the platform's own factory never notice — which is why it sits for months: everything anyone
+opened was in the hand-written module.
 
 Anchor the first pattern where an annotation can sit — line start, optional indent, word boundary.
 Unanchored, `@Factory` matches every `return@Factory` label return and `@Single` matches a leftover
@@ -66,10 +65,10 @@ file is no longer the answer to "what is registered", and the two disagree silen
 
 ## The store owner decides identity, not which accessor you typed
 
-The container never holds the instance. Every container accessor hands the platform a
-`ViewModelStore` plus a key and asks it to resolve, supplying only the factory that builds the object
-on a miss. With **no qualifier and no scope** the key comes out null, so the lookup lands on the
-*default* slot of that store — the same slot the platform's own delegate uses.
+The container never holds the instance. Every accessor hands the platform a `ViewModelStore` plus a
+key and asks it to resolve, supplying only the factory that builds the object on a miss. With **no
+qualifier and no scope** the key comes out null, so the lookup lands on that store's *default* slot
+— the same slot the platform's own delegate uses.
 
 | Written | Store owner it addresses | Built on first resolve by |
 |---|---|---|
@@ -88,10 +87,8 @@ container scope splits the slot the other way — the key stops being null, so o
 Audit by import, not by call — and compare *owners*. Anchor on the delegate packages, or the second
 pattern also matches the module-DSL `viewModel` builder, which is a definition and not a call site:
 ```bash
-grep -rnE '^import (androidx|org\.koin\.androidx)\.[a-z.]+\.activityViewModels?$' \
-  --include="*.kt" . --exclude-dir=build      # host store
-grep -rnE '^import (androidx|org\.koin\.androidx)\.[a-z.]+\.viewModels?$' \
-  --include="*.kt" . --exclude-dir=build      # this screen's own store
+grep -rnE --include='*.kt' --exclude-dir=build '^import (androidx|org\.koin\.androidx)\.[a-z.]+\.activityViewModels?$' .  # host store
+grep -rnE --include='*.kt' --exclude-dir=build '^import (androidx|org\.koin\.androidx)\.[a-z.]+\.viewModels?$' .  # own store
 ```
 The same view-model type reached through both lists is the smell. Both empty, as here, means a
 Compose-only codebase where the ambiguity mostly goes away — resolution is `koinViewModel()` at the
@@ -123,9 +120,11 @@ Every hit needs an answer to "who else resolves from this module, and are they a
 
 ## Traps
 
-**A view model injected into a non-view-model is a design signal.** A widget or scheduled job
-needing a view model means the operation it wants is not really presentation state. Lift the
-operation instead — `no-use-case-layer-decision` covers when that is worth naming.
+**For one value off a shared flow, inject the repository, not a view model.** A leaf composable — a
+top-bar icon needing one boolean — on several screens gets a *separate* view model per screen. Same
+reasoning, harder, for a widget or a scheduled job: a `viewModel { }` definition has **no owner**
+outside a composition, so there it does not duplicate, it fails to resolve. And if the operation it
+wanted is not really presentation state, lift the operation — `no-use-case-layer-decision`.
 
 **`by inject()` in a constructor-injected class is a mixed metaphor.** Once a class takes some
 dependencies as parameters and looks the rest up, no reader can tell which is which without reading

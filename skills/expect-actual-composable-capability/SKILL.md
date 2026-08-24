@@ -28,25 +28,24 @@ A capability one platform lacks still gets a full `actual`. It returns the neutr
 ## Traps
 
 **A stub must be correct, not absent.** `TODO()` in an `actual` compiles, ships, and stops the app
-the first time that platform paints the screen — and because it sits behind a capability nobody
-tests on the secondary platform, it reaches users. The neutral value is almost always obvious: `false`
-for "is this mode active", an empty body for an effect, an empty list for a query. Write it, and put
-the reason on the same line.
+the first time that platform paints the screen — and because it sits behind a capability nobody tests
+on the secondary platform, it reaches users. The neutral value is almost always obvious: `false` for
+"is this mode active", an empty body for an effect, an empty list for a query. Write it, with the
+reason on the same line.
 
 **An empty `actual` is a decision, and it is not the same decision as "the platform cannot".** Both
 look identical in the source. In the file inspected here the desktop target implements the
 measurement fully — from ordinary shared Compose APIs — while leaving the keep-awake effect empty
-under a note to implement it later. The full measurement proves nothing about the empty effect; the
-two capabilities are unrelated. What it does show is that an empty body in that company is not a
-statement that the platform cannot — it is a statement that nobody wrote anything. Before concluding
-a platform lacks a capability, check that someone actually looked: see
-`noop-actual-not-platform-limit`.
+under a note to implement it later. The full measurement proves nothing about the empty effect: they
+are unrelated capabilities, and an empty body in that company says nobody wrote anything, not that
+the platform cannot. Before concluding a platform lacks a capability, check that someone actually
+looked — see `noop-actual-not-platform-limit`.
 
 **The neutral return is a real answer, and callers act on it.** A stub returning `false` for a
 windowing-mode query does not mean "unknown" — every `if` in shared code reads it as "not in that
-mode" and lays the screen out accordingly. That is correct for a platform with no such mode, and
-wrong for one that has it and simply is not wired yet. If the difference matters, make the capability
-return something that can say "not supported here", and make the callers handle it.
+mode" and lays out accordingly. Correct for a platform with no such mode; wrong for one that has it
+and simply is not wired yet. If that difference matters, make the capability able to say "not
+supported here", and make the callers handle it.
 
 **`@Composable` belongs on the `expect` *and* on every `actual`.** It is part of the declaration, not
 an implementation detail, and a mismatch is rejected — but the confusing case is the reverse: an
@@ -59,19 +58,38 @@ same way and removes it. A capability that sets a device-wide flag and never cle
 screen that asked for it, and the symptom appears somewhere else entirely. If an actual has no
 `onDispose`, it is either genuinely stateless or a leak.
 
-**A measurement needs a cache key, and the right key differs per platform.** The Android actual
-wraps its whole computation in `remember(configuration)`, so it recomputes when the configuration
-changes and not on every recomposition. The desktop actual reads a Compose-provided window value that
-is already observable and needs no key at all. Copying the Android shape onto the other platform as
-`remember(Unit)` would freeze the value at first composition and never update on resize — a bug that
-only appears on the platform where windows get resized.
+**A measurement needs a cache key, and the right key differs per platform.** The Android actual wraps
+its computation in `remember(configuration)`, so it recomputes on configuration change and not on
+every recomposition. The desktop actual reads a Compose-provided window value that is already
+observable and needs no key. Copying the Android shape over as `remember(Unit)` freezes the value at
+first composition and never updates on resize — a bug only the platform with resizable windows shows.
+
+**A measurement reports the container, and your own chrome may be inside it.** A title bar drawn *by
+the app*, above the content, is still part of the container the measurement reads — so the height it
+returns includes a strip no layout can use, and every consumer computing "how much room have I got"
+overflows by exactly that strip. It reads as a styling difference rather than a wrong number, and
+anything gating on the measurement inherits it (`responsive-gate-size-not-platform`). Two things make
+the correction survive: **one constant**, read by both the bar that draws the strip and the actual
+that subtracts it, and a **conditional** subtraction:
+
+```kotlin
+// adapted — the flag is published once, at window creation, before the first frame
+object WindowChrome { const val TITLE_BAR_HEIGHT_DP = 40; @Volatile var inWindowBar = false }
+val chromeTopPx = if (WindowChrome.inWindowBar)
+    with(density) { WindowChrome.TITLE_BAR_HEIGHT_DP.dp.roundToPx() } else 0
+val contentHeightPx = (window.containerSize.height - chromeTopPx).coerceAtLeast(0)
+```
+
+The condition is not "which platform": the same platform draws its own bar in some configurations and
+lets the system decorate the window in others, and a **system** decoration lives *outside* the
+container size — subtracting there under-reports by the same amount. Check which windows call the
+measurement, too: a secondary window with different chrome needs its own answer.
 
 **The platform actual is where the activity hunt lives, and how it asks decides what happens when
-there is none.** The Android file inspected here walks the context chain twice, in two functions:
-one returns null when it runs out, the other throws. A composable built on the throwing walk takes
-the screen down when it is hosted outside an activity — a preview, an embedded host, a test. Pick
-per capability, deliberately: a measurement can fall back to zero, a mode subscription probably
-cannot subscribe at all.
+there is none.** The Android file inspected here walks the context chain twice, in two functions: one
+returns null when it runs out, the other throws. A composable built on the throwing walk takes the
+screen down when hosted outside an activity — a preview, an embedded host, a test. Pick per
+capability: a measurement can fall back to zero, a mode subscription probably cannot subscribe.
 
 **Version branches and their suppressions live in the actual, and that is correct.** The Android
 measurement carries `@Suppress("DEPRECATION")` for its older-API branch. Keeping that inside the
@@ -87,9 +105,9 @@ grep -rhoE "expect fun [a-zA-Z][A-Za-z0-9_]*" --include="*.kt" . | sed 's/expect
 done
 ```
 
-Read the column, not the count: a declaration listing fewer source sets than its siblings is either
-a target that will not link or a hierarchy where one parent source set covers several targets — both
-worth knowing before a release build tells you.
+Read the column, not the count: a declaration listing fewer source sets than its siblings is either a
+target that will not link or a hierarchy where one parent covers several — both worth knowing before
+a release build tells you.
 
 Then find the stubs, so each one is a decision you have seen:
 
@@ -101,13 +119,22 @@ find . -path "*/src/*Main/*" -name "*.kt" | while read -r f; do
 done
 ```
 
-Stripping comments first is what makes this find the ones written as a bare comment inside an
-otherwise empty body — which is exactly how a stub is usually spelled. Each hit should have a reason
-next to it; the ones that do not are the candidates for the check in
-`noop-actual-not-platform-limit`.
+Stripping comments first is what finds the ones written as a bare comment inside an otherwise empty
+body — exactly how a stub is usually spelled. Each hit needs a reason next to it; the ones without
+are candidates for `noop-actual-not-platform-limit`.
 
 And confirm nothing ships an unwritten branch:
 
 ```bash
 grep -rn -A4 "actual fun " --include="*.kt" . | grep -E "TODO\(\)|NotImplementedError"
 ```
+
+Finally, for a measurement actual, confirm the chrome strip has **one** definition and **two**
+readers — the composable that draws it and the actual that subtracts it:
+
+```bash
+grep -rn 'TITLE_BAR_HEIGHT\|_BAR_HEIGHT_DP' --include='*.kt' . | grep -v '/build/'
+```
+
+A literal height in the bar plus a separate literal in the actual is the drift this prevents; one
+reader and no other is a subtraction nothing keeps honest.
