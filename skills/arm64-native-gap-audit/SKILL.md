@@ -5,18 +5,17 @@ description: Audit every native dependency for a slice on a CPU architecture bef
 
 # Auditing an architecture before you promise it
 
-Adding a CPU-architecture target to a desktop build is not a build-system question. Everything
-compiles; the packager happily produces an installer; the app launches. Then the first call into
-a dependency that carries a compiled binary fails, because that dependency shipped slices for four
-architectures and yours was not one of them.
+Adding a CPU-architecture target to a desktop build is not a build-system question: everything
+compiles, packages and launches, then the first call into a dependency carrying a compiled binary
+fails, because it shipped slices for four architectures and yours was not one of them.
 
-**One missing native takes the whole target down.** There is no partial success and no graceful
-degradation: a database driver with no slice for your architecture cannot open a connection, so the
-app is not "missing a feature", it is finished.
+**One missing native takes the whole target down.** No partial success, no graceful degradation: a
+database driver with no slice for your architecture cannot open a connection — the app is not
+"missing a feature", it is finished.
 
-**The failure is at first use, not at build time.** Nothing in a normal pipeline — compile, package,
-sign, install, launch — touches the native. Only exercising the feature does. That is why this must
-be an *audit you run deliberately*, not something you expect CI to tell you.
+**The failure is at first use, not at build time.** Compile, package, sign, install, launch — none
+of that touches the native. Only exercising the feature does, which is why this must be an *audit
+you run deliberately*, not something you expect CI to tell you.
 
 ## The audit
 
@@ -30,8 +29,7 @@ dependency list:
 So the audit is: resolve the runtime classpath, then look *inside* each jar.
 
 ```bash
-# First pass: every jar in the local dependency cache, and the native
-# directories each one carries. (Narrow it to your real classpath next.)
+# Every jar in the local cache and its native dirs; narrow to your real classpath next.
 find ~/.gradle/caches/modules-2 -name '*.jar' \
 | while read -r jar; do
     slices=$(unzip -l "$jar" 2>/dev/null \
@@ -41,24 +39,19 @@ find ~/.gradle/caches/modules-2 -name '*.jar' \
   done
 ```
 
-Point it at the exact set your build resolves rather than the whole cache by having Gradle print
-the classpath first (a `doLast` that iterates `configurations.getByName("…RuntimeClasspath")` and
-prints each file), then feeding those paths into the same loop.
+Point it at the exact set your build resolves, not the whole cache: have Gradle print the classpath
+first (a `doLast` iterating `configurations.getByName("…RuntimeClasspath")`), then feed those paths
+into the same loop.
 
 Real output, two jars, two completely different layouts:
 
 ```
-# adapted — jar names genericised; the second listing is a selection from its 23 rows
-== bundled-database-driver.jar
-natives/linux_arm64
-natives/linux_x64
-natives/osx_arm64
-natives/osx_x64
+# adapted — jar names genericised; each block below is a selection, not the full listing
+== bundled-database-driver.jar (selection from its 5 rows)
 natives/windows_x64          <- no windows_arm64: this is the gap
+…
 
-== native-access-library.jar
-com/sun/jna/linux-aarch64
-com/sun/jna/linux-x86-64
+== native-access-library.jar (selection from its 23 rows)
 com/sun/jna/win32-x86
 …
 ```
@@ -75,10 +68,9 @@ which architectures to expect. Diff the slice list of *every* native dependency 
 list, and treat "this one has fewer rows than the others" as the finding.
 
 **Auditing the obvious dependencies is not auditing.** In one real audit the renderer, the media
-backend and the JVM distribution all had slices for the architecture in question — every dependency
-anyone thought to check. The one that did not was the bundled database driver, which nobody
-associates with native code at all. The rule is *every* dependency that carries a binary, including
-the ones that feel like pure library code.
+backend and the JVM distribution all had slices for the architecture — every dependency anyone
+thought to check. The one that did not was the bundled database driver, which nobody associates
+with native code. The rule is *every* dependency carrying a binary, even ones that feel like pure library code.
 
 **A pre-release of the same library is not a fix.** Verify the slice exists in the exact version you
 would ship. In the audited case the gap was present in both the stable version and a later alpha.
@@ -90,24 +82,59 @@ cheapest thing in the pipeline to re-run and the most expensive thing to discove
 dependency too, and they are the one set nobody upstream is maintaining for you.
 
 **Also check what your JVM distribution ships.** Not every vendor publishes a build for every
-architecture; a packager that bundles a runtime fails at package time complaining that no runtime
-inputs were supplied for that machine target — accurate, but easy to misread as your configuration
-mistake rather than a vendor gap.
+architecture; a packager bundling a runtime then fails at package time complaining no runtime
+inputs were supplied for that target — accurate, but easy to misread as your mistake, not a vendor gap.
 
 ## When the gap is real
 
-Drop the target. Do not ship a build you know cannot open its own database. On Windows, an
-x64 package runs under the OS's emulation layer on ARM64 hosts and works correctly, which is a
-better user experience than a native build that dies at its first database connection — say so in
-the release notes.
+Drop the target rather than ship a build you know cannot open its own database. On Windows, an x64
+package runs correctly under the OS's emulation layer on ARM64 hosts — a better experience than a
+native build that dies at its first database connection. Say so in the release notes.
 
 Then make the decision recoverable: **keep the plumbing in git history and name the commits that
-hold it** in the message that removes the target, plus the exact upstream condition that would let
-you re-enable it ("re-enable once the driver publishes a windows-arm64 slice"). A future reader
-otherwise cannot tell "we decided against this" from "nobody got around to it".
+hold it**, in the commit message that removes the target, plus the upstream condition that would
+let you re-enable it ("once the driver publishes a windows-arm64 slice") — otherwise a future
+reader cannot tell "we decided against this" from "nobody got around to it".
 
 ## Related
 
 The same audit belongs in the database setup itself — see the sibling skill `room-kmp-setup`. The
 architecture gap lives in the driver **artifact**, not in the database class, so no amount of
 reading your own persistence code will surface it.
+
+## Verifying it
+
+Run from the repo being audited; step 1 (the jar scan) needs only a populated dependency cache.
+
+1. **The audit script finds a real gap, and the two dependencies share no naming convention:**
+
+   ```bash
+   SQLITE=$(find ~/.gradle/caches/modules-2 -name 'sqlite-bundled-jvm-2.7.0.jar' ! -name '*sources*' | head -1)  # match your pinned version
+   JNA=$(find ~/.gradle/caches/modules-2 -name 'jna-5.19.1.jar' | head -1)
+   for j in "$SQLITE" "$JNA"; do
+     echo "== $(basename "$j") =="; unzip -l "$j" | grep -Eio '[^ ]+\.(so|dll|dylib)$' | xargs -n1 dirname | sort -u
+   done
+   ```
+
+   Pass condition: unrelated directory shapes (`natives/<os>_<arch>` vs `com/sun/jna/<os>-<arch>`),
+   and no printed row for the sqlite jar names `windows_arm64` — a live gap nobody reads as native code.
+
+2. **The dropped target names this exact dependency, not a guess:**
+
+   ```bash
+   grep -n "sqlite-bundled-jvm\|windows_arm64\|windows.aarch64" conveyor.conf
+   ```
+
+   Pass condition: the comment names the dependency and the missing file; `machines = [...]` a few
+   lines below omits `windows.aarch64`.
+
+3. **Auditing the obvious dependency first would have missed this gap.** The media engine — what
+   anyone would suspect before a database driver — already has the slice:
+
+   ```bash
+   file mpv-natives/windows-arm64/libmpv-2.dll
+   grep -n "mpvSetupWindowsArmCi" composeApp/build.gradle.kts
+   ```
+
+   Pass condition: `file` reports `Aarch64`, not a renamed x64 copy — proof a real ARM64 slice is
+   staged; the grep prints at least one line, the CI task that stages it, before this dependency.

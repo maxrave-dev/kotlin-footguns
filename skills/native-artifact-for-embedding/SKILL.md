@@ -8,9 +8,9 @@ description: Producing a native shared library a JVM app can actually load and s
 Embedding is not the same job as running a program. A prebuilt native distribution is built to be
 its own process; you need something that opens **inside a JVM that has already mapped the host's
 system libraries**. Most prebuilt bundles cannot do that, and the failure is invisible on any
-machine that also has the library installed system-wide — the loader silently uses that one
-instead. Build the artifact yourself, in a container, and make the build refuse to produce a
-slice that cannot load.
+machine that also has the library installed system-wide — the loader silently uses that one instead.
+Build the artifact yourself, in a container, and make the build refuse to produce a slice that
+cannot load.
 
 ## Traps
 
@@ -52,11 +52,10 @@ for so in "$OUT"/lib/*.so*; do patchelf --force-rpath --set-rpath '$ORIGIN' "$so
 Verify with `readelf -d <file> | grep -E 'RPATH|RUNPATH'` — some `patchelf` versions default to
 RUNPATH, which is why `--force-rpath` is not optional.
 
-**Exclude the base-system libraries on purpose, by name.** "Everything `ldd` printed" is the
-wrong closure: shipping a second C runtime, math library, C++ runtime or program loader is the
-failure that ruled out the portable bundle in the first place. Keep the exclusion list explicit
-and near the copy loop, so adding a library to the bundle is a decision someone made rather than
-a side effect.
+**Exclude the base-system libraries on purpose, by name.** "Everything `ldd` printed" is the wrong
+closure: shipping a second C runtime, math library, C++ runtime or program loader is the failure
+that ruled out the portable bundle in the first place. Keep the exclusion list explicit and near the
+copy loop, so adding a library to the bundle is a decision someone made rather than a side effect.
 
 ```bash
 # adapted — compressed from the staging script
@@ -69,8 +68,7 @@ is_system() { local n="$1"; for s in $SYSTEM_LIBS; do [[ "$n" == "$s" ]] && retu
 
 Widely-shared libraries that are *not* strictly base-system belong on this list too if the host
 application uses them independently — a bundled copy that wins the name can break an unrelated
-part of the host process. Prefer removing such a library from the bundle over working around it
-in application code.
+part of the host process.
 
 **Libraries installed outside the loader cache vanish from the closure silently.** Anything you
 built into a local prefix is not in the cache on a bare image, so `ldd` reports it "not found",
@@ -87,12 +85,11 @@ ldconfig
 a versioned file, and a link with nothing behind it is a load failure at the user's end.
 
 **Trim what the embedding path can never reach.** If you drive the engine through its software
-render path, the whole GPU/shader stack is unreachable code that still has to be shipped and
-signed; disabling it at configure time removed the single largest chunk of the closure here. The
-same for encoders in a playback-only app. Two cautions: a subsystem you disable takes its
-*options* with it (a build without the scripting layer genuinely has no option to turn scripting
-off — see the feature-detection rule in the sibling skill `embed-media-engine-desktop`), and an optional audio filter you
-disable is one your runtime code must be able to do without.
+render path, the whole GPU/shader stack is unreachable code that still has to be shipped and signed;
+disabling it at configure time removed the single largest chunk of the closure here — same for
+encoders in a playback-only app. Caution: a subsystem you disable takes its *options* with it (see
+the feature-detection rule in the sibling skill `embed-media-engine-desktop`), and an optional audio
+filter you disable is one your runtime code must be able to do without.
 
 **Gate the build on load-and-initialize, in the builder.** Two gates, both failing the build:
 
@@ -113,5 +110,31 @@ Run it under the numeric-locale state the app will actually enforce. The JVM ado
 locale at startup (it calls the set-locale routine with an empty name), which is why an embedding
 app must force the numeric category back to C itself before initializing an engine that parses
 numbers in the C locale — and why the smoke test sets `LC_NUMERIC=C` too: it exercises the
-artifact under the same state the app guarantees at runtime. A slice that resolves everything and still fails to initialize is
-exactly what ships when the only gate is "the files are present".
+artifact under the same state the app guarantees at runtime. A slice that resolves everything and
+still fails to initialize is exactly what ships when the only gate is "the files are present".
+
+## Verifying it
+
+Run from the repo being audited — the one with `mpv-natives/` and `scripts/mpv-linux/stage.sh`.
+
+1. **`patchelf --force-rpath` really writes `RPATH`, never `RUNPATH` — verify on a copy, never the file you ship:**
+
+   ```bash
+   SO=mpv-natives/linux-x64/lib/libX11-xcb.so.1   # any one shared object you're staging
+   cp "$SO" /tmp/rpath-test.so && chmod +w /tmp/rpath-test.so
+   patchelf --force-rpath --set-rpath '$ORIGIN' /tmp/rpath-test.so
+   objdump -p /tmp/rpath-test.so | grep -iE 'rpath|runpath'
+   objdump -p mpv-natives/*/lib/*.so* 2>/dev/null | grep RUNPATH
+   ```
+
+   Pass condition: the copy prints `RPATH   $ORIGIN`, never `RUNPATH`. A freshly staged tree prints
+   nothing for the second command; this repo's checked-in tree does — it is stale.
+
+2. **The exclusion list, local-prefix registration and load-and-initialize gate are real, named code, not folklore:**
+
+   ```bash
+   grep -n "SYSTEM_LIBS=\|is_system()\|ld.so.conf.d\|ldconfig\|dlopen\|mpv_initialize\|LC_NUMERIC=C" scripts/mpv-linux/stage.sh
+   ```
+
+   Pass condition: `SYSTEM_LIBS`/`is_system()` sit together; `ld.so.conf.d`/`ldconfig` precede the
+   dependency walk; the smoke test calls `dlopen` then `mpv_initialize` under `LC_NUMERIC=C`.

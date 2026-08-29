@@ -109,3 +109,30 @@ main-thread coroutine and the write serializes behind another one.
 **One store instance, created once.** The preferences store owns a file lock and a single write
 queue; constructing a second one over the same path is undefined. Register it as a singleton in the
 container and hand *that* to the manager, rather than letting the manager create its own.
+
+## Verifying it
+
+1. **The three files, and the platform hook, still match this shape:**
+   ```bash
+   grep -n "^interface DataStoreManager" core/domain/src/commonMain/kotlin/com/maxrave/domain/manager/DataStoreManager.kt   # your equivalent interface
+   grep -rn "fun createDataStoreInstance" --include="*.kt" core/data/src   # your equivalent data module
+   ```
+   Pass condition: one `interface` in the domain module; one `expect fun` in commonMain and one
+   `actual fun` per platform source set that needs it — here, android, jvm and ios each supply one.
+
+2. **The boolean constants live where both layers can see them, not in the data module:**
+   ```bash
+   grep -n "companion object\|const val TRUE\|const val FALSE" core/domain/src/commonMain/kotlin/com/maxrave/domain/manager/DataStoreManager.kt
+   ```
+   Pass condition: `TRUE`/`FALSE` sit inside a `companion object` in the same file as the `interface`
+   declaration — the domain module, not the data module.
+
+3. **The synchronous getters stay countable, and the store is registered exactly once:**
+   ```bash
+   IMPL=core/data/src/commonMain/kotlin/com/maxrave/data/dataStore/DataStoreManagerImpl.kt   # your equivalent
+   grep -c "runBlocking" "$IMPL"
+   grep -rn "single<DataStoreManager>" --include="*.kt" . --exclude-dir=build
+   ```
+   Pass condition: the first count stays small — a handful, not a growing pattern — here, 7; the
+   second finds exactly one registration. A second `single<DataStoreManager>` would mean two stores
+   over the same path, which the manager itself has no way to detect.

@@ -22,7 +22,8 @@ What holds it up instead:
 - **Repositories split by aggregate, not one per app.** Roughly one per top-level concept, each in
   the tens of methods. Check the shape before deciding anything:
   ```bash
-  find domain/src -path '*/repository/*.kt' | while read -r f; do
+  DOMAIN_SRC=core/domain/src   # your equivalent of :domain
+  find "$DOMAIN_SRC" -path '*/repository/*.kt' | while read -r f; do
     echo "$(grep -cE '^    (suspend )?fun ' "$f") $(basename "$f")"
   done | sort -rn
   ```
@@ -87,7 +88,8 @@ needs an operation that currently lives in a view model. Rather than injecting a
 the tier the session-scoped view model is the one that absorbs orchestration, and it grows without
 any single change looking unreasonable. Watch it by size, not by feel:
 ```bash
-find app/src -path '*/viewModel/*.kt' -exec wc -l {} + | sort -rn | head
+APP_SRC=composeApp/src   # your equivalent of :app
+find "$APP_SRC" -path '*/viewModel/*.kt' -exec wc -l {} + | sort -rn | head
 ```
 When one file is an order of magnitude larger than its siblings, the tier came back — unnamed,
 untestable and bound to the presentation lifecycle.
@@ -109,3 +111,30 @@ the discoverability. At that point name it and inject it.
 Run the grep from `clean-arch-kmp-readiness` that lists what the app module imports out of the data
 module. A stack with no use cases and no leaks is clean; a stack with a full interactor tier and a
 repository implementation imported into a screen is not.
+
+## Verifying it
+
+`## Proving an absence`, above, is this skill's main check — run it before trusting anything else
+here. These three cover the claims that hold the boundary up in its place:
+
+1. **No view model imports a `RepositoryImpl`, only the interface:**
+   ```bash
+   VM_DIR=composeApp/src/commonMain/kotlin/com/maxrave/simpmusic/viewModel   # your equivalent
+   grep -rln "RepositoryImpl" --include="*.kt" "$VM_DIR"
+   ```
+   Pass condition: no output. A hit means a screen is constructing (or naming) the implementation directly, and the interface boundary is decorative for that one class.
+
+2. **The pure mapping functions this skill leans on for "where did the use case's logic go" exist,
+   and stay `internal`:**
+   ```bash
+   grep -rn "internal fun .*\.to[A-Z][A-Za-z]*(" --include="*.kt" core/data/src | wc -l
+   ```
+   Pass condition: nonzero — here, 19 — and each one only reachable from inside the data module. A
+   public one is a mapper the app module could call directly, skipping the repository.
+
+3. **No repository interface imports an integration's transport types — checked by inverting the whitelist instead of naming one:**
+   ```bash
+   DOMAIN_REPO=core/domain/src/commonMain/kotlin/com/maxrave/domain/repository   # your equivalent
+   grep -rh "^import " "$DOMAIN_REPO"/*.kt | grep -v "^import com.maxrave.domain\|^import kotlin" | sort -u
+   ```
+   Pass condition: nothing printed belongs to an integration module — here it prints one line, `import androidx.paging.PagingData`. A hit is the "do not let a repository return transport types" trap, caught structurally instead of in review.

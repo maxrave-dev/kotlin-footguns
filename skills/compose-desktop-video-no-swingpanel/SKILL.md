@@ -6,10 +6,10 @@ description: Rendering video frames from a native media engine in Compose Deskto
 # Compose Desktop video without an embedded panel
 
 Most native media engines expose a **software render path**: you hand it a pixel buffer and a size,
-it decodes, scales and letterboxes a frame into that buffer, and you copy it out. The obvious way
-to show the result in Compose Desktop is to blit it onto an AWT/Swing component and embed that.
-Do not. Publish finished frames as immutable images on a `StateFlow` and draw them with a plain
-`Image`; the engine side is identical and the whole embedding bug class disappears.
+it decodes, scales and letterboxes a frame into that buffer, and you copy it out. The obvious way to
+show the result in Compose Desktop is to blit it onto an AWT/Swing component and embed that. Do not.
+Publish finished frames as immutable images on a `StateFlow` and draw them with a plain `Image`; the
+engine side is identical and the whole embedding bug class disappears.
 
 ## Why the embedded-panel route fails
 
@@ -19,9 +19,8 @@ Three separate failures, all structural rather than fixable:
   of z-order, so nothing can be placed on top of the video.
 - It **repositions one frame late** while the page scrolls — visible as a flicker that exposes
   whatever is behind the window, and worse on a transparent window.
-- The toolkit gives a component exactly **one parent**. Two screens that both compose the player
-  fight over the single instance and the loser renders black — the "video randomly missing until
-  next/previous" report.
+- The toolkit gives a component exactly **one parent**: two screens composing the player fight over
+  the single instance, and the loser renders black until next/previous — the "video randomly missing" report.
 
 An `Image` participates in normal Compose rendering, and any number of screens can collect the same
 frame source at once.
@@ -41,17 +40,16 @@ with the opposite convention is exactly what produces the classic red/blue-swapp
 uninitialized — often zero, but not guaranteed. In an ARGB image that byte *is* the alpha channel,
 so a garbage zero makes every frame fully transparent. The non-alpha type ignores the high byte.
 
-**Honour the stride alignment the engine asks for, and make the staging buffer stride-wide.**
-Padding the row stride up to the requested alignment (commonly 64 bytes) keeps the engine on its
-fast path; making the staging array *stride*-wide as well keeps the whole frame one contiguous run,
-so it comes out of native memory in a single bulk read. Publish only the leftmost `width` columns —
-the padding between the end of one row and the start of the next is explicitly unspecified.
+**Honour the stride alignment the engine asks for, and make the staging buffer stride-wide.** Pad
+the row stride up to the requested alignment (commonly 64 bytes) to keep the engine on its fast
+path, and make the staging array *stride*-wide too so the whole frame is one contiguous run, read
+out of native memory in a single bulk copy. Publish only the leftmost `width` columns — the padding
+between one row's end and the next row's start is explicitly unspecified.
 
 **Publish a new image per frame.** A `StateFlow` conflates equal values, so re-emitting a mutated
-image is dropped and the picture freezes. Allocating a fresh snapshot per frame also makes every
-published frame immutable, which is what lets any collector convert or draw it on any thread with
-no tearing — and it replaces the per-frame blit the UI thread used to do, so the total copy work is
-unchanged.
+image is dropped and the picture freezes. A fresh snapshot per frame is also immutable, which lets
+any collector convert or draw it on any thread with no tearing — replacing the per-frame blit the
+UI thread used to do, so total copy work is unchanged.
 
 ```kotlin
 // adapted
@@ -77,40 +75,66 @@ Box(modifier.onSizeChanged { source.setTargetSize(it.width, it.height) }) {
 }
 ```
 
-**The engine decides the fit, not Compose.** It scales *and letterboxes* into exactly the size you
-reported, so the black bars are already pixels by the time Compose sees the frame — no
-`ContentScale` can remove them. Cropping is the engine's own pan-scan property, and applying it
-from a `LaunchedEffect` keyed on the handle **and** the flag re-scales the running video instead of
-tearing down and recreating the handle:
+**The engine decides the fit, not Compose.** It scales *and letterboxes* into exactly the size you reported,
+so the black bars are already pixels by the time Compose sees the frame — no `ContentScale` can remove them.
+Cropping is the engine's own pan-scan property, and applying it from a `LaunchedEffect` keyed on the handle
+**and** the flag re-scales the running video instead of tearing down and recreating the handle:
 
 ```kotlin
 // adapted
 LaunchedEffect(player, cropToBounds) { player?.setPanscan(if (cropToBounds) 1.0 else 0.0) }
 ```
 
-`ContentScale` on the `Image` then only matters for the moment after a resize, while the next
-correctly-sized frame is still being rendered.
+`ContentScale` still matters briefly after a resize, until the next correctly-sized frame renders.
 
 **The engine's update callback fires on a foreign thread and may only signal.** Render APIs
-typically forbid calling any of their functions from inside it. Signal a semaphore, and do all
+typically forbid calling any of their functions from inside it, so signal a semaphore and do all
 rendering on a thread you own that calls nothing but the render functions. In that loop: use a
 **bounded** wait so a stop flag is noticed promptly, then drain the permits — a backlog should
-collapse to the newest frame rather than run the loop once per missed frame — and skip the render
-call entirely unless the engine reports a new frame or a resize invalidated the buffer, since
-software rendering is processor-bound.
+collapse to the newest frame, not run once per missed frame — and skip rendering entirely unless
+the engine reports a new frame or a resize invalidated the buffer, since it is processor-bound.
 
 **Swap the published source unconditionally, and clear it on detach.** A null-guard around "set the
 frame source for the new handle" keeps the *outgoing* handle's source on screen whenever the
-incoming track has no video, leaving a dead surface belonging to a handle about to be released —
-that is the "black video until next/previous" symptom in its second form. Setting it to null on
-detach lets the UI fall back to artwork instead of holding a stale frame.
+incoming track has no video — a dead surface belonging to a handle about to be released, the "black
+video until next/previous" symptom in its second form. Nulling it on detach lets the UI fall back
+to artwork instead of holding a stale frame.
 
 **Allocate and reallocate on the render thread.** Size changes arrive from Compose layout; keeping
-the allocation itself on the render thread keeps native allocation off the UI, and swapping the
-whole target object wholesale (rather than mutating width/height in place) means the render loop
-and the teardown path can never disagree about dimensions mid-copy.
+allocation on the render thread keeps it off the UI, and swapping the whole target object wholesale
+— rather than mutating width/height in place — means the render loop and teardown can never
+disagree about dimensions mid-copy.
 
 **Keep the native memory the render parameters point into alive.** The parameter block usually
 stores raw pointers into small allocations holding the size, the stride and the format string; the
 engine dereferences them on every render call. Fields that look unused are load-bearing — losing
 the reference lets the binding free them out from under native code.
+
+## Verifying it
+
+Run from the repo root, where the `core/media/...` paths below resolve.
+
+1. **`SwingPanel` is gone from the video path; frames publish on a `StateFlow`; the format pairs with the non-alpha image type:**
+
+   ```bash
+   grep -n "val frames: StateFlow<BufferedImage?>\|bgr0\|TYPE_INT_RGB" core/media/media-jvm/src/main/java/com/simpmusic/media_jvm/mpv/MpvVideoFrameSource.kt
+   grep -rn "SwingPanel(" core/media/media-jvm-ui core/media/media-jvm
+   ```
+
+   Pass condition: the first prints all three; the second prints nothing.
+
+2. **A fresh image is allocated per frame, inside the render loop, never the resize path:**
+
+   ```bash
+   grep -n "fun renderLoop\|fun ensureSurface\|BufferedImage(target.width" core/media/media-jvm/src/main/java/com/simpmusic/media_jvm/mpv/MpvVideoFrameSource.kt
+   ```
+
+   Pass condition: the allocation's line sits between `renderLoop` and the next function, never inside resize-only `ensureSurface`.
+
+3. **`setPanscan` runs inside the crop-setting `LaunchedEffect`; `ContentScale.Fit` is a separate hit on the `Image` call:**
+
+   ```bash
+   grep -n "LaunchedEffect(mpvPlayer, cropToBounds)\|setPanscan\|ContentScale.Fit" core/media/media-jvm-ui/src/main/java/com/maxrave/media_jvm_ui/ui/MediaPlayerView.kt
+   ```
+
+   Pass condition: `setPanscan` is the line immediately after the `LaunchedEffect` match.

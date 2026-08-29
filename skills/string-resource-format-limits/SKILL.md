@@ -1,6 +1,6 @@
 ---
 name: string-resource-format-limits
-description: The multiplatform resource formatter substitutes plain positional placeholders and nothing else — no flags, no width, no escaped percent — so padding, rounding, units and symbols belong in code and the resource only ever joins already-formatted pieces. Covers the same omission in its other two shapes: a raw stored number printed straight to screen, and a date-time library's month names that are constants rather than locale lookups. Use when a format specifier renders verbatim on screen, when a label appears in English regardless of language, or when a screen prints a number in the unit the database happens to store.
+description: "The multiplatform resource formatter substitutes plain positional placeholders and nothing else — no flags, no width, no escaped percent — so padding, rounding, units and symbols belong in code and the resource only ever joins already-formatted pieces. Covers the same omission in its other two shapes: a raw stored number printed straight to screen, and a date-time library's month names that are constants rather than locale lookups. Use when a format specifier renders verbatim on screen, when a label appears in English regardless of language, or when a screen prints a number in the unit the database happens to store."
 ---
 
 # The resource joins pieces; it does not format them

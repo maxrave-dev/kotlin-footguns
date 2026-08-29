@@ -1,6 +1,6 @@
 ---
 name: bundled-native-soname-conflict
-description: A native library you bundle with a desktop app drags its own copy of a general-purpose base library along, that copy claims the shared-object name for the whole process the moment your native loads, and an unrelated platform API then fails with a missing-symbol message naming a third library. Use when a feature that opens links or system dialogs works on your machine but silently does nothing on users' machines, when a platform API reports itself unsupported at runtime, or when deciding what a native bundle may contain.
+description: A native library you bundle with a desktop app drags its own copy of a general-purpose base library along, that copy claims the shared-object name for the whole process the moment your native loads, and an unrelated platform API then fails with a missing-symbol message naming a third library. Use when a feature that opens links or system dialogs works on your machine but silently does nothing on users' machines, when a platform API reports itself unsupported at runtime, when deciding what a native bundle may contain, or when a merged fix for exactly this bug does not seem to have changed anything for users.
 ---
 
 # A bundled base library claims a system library name
@@ -95,12 +95,27 @@ enough — waiting for an exit code blocks the UI thread you were called on.
 **Bundling a second copy of the process's C runtime is the same bug, harder.** The host runtime
 is already mapped before your code runs; a second copy in one process cannot be made to work.
 
+**The cure landing in a diff is not the cure landing in production.** The worked example above was
+glib (`libglib-2.0.so.0`), missing from the exclusion list, breaking `java.awt.Desktop` on any host
+whose system glib was newer than the bundled one. Adding the missing name to the list is a one-line
+change and looks, in review, like the whole fix. It is not: the artifact users actually load is a
+prebuilt archive, published separately and pinned by checksum elsewhere in the build (see
+`reproducible-native-bundling-two-tasks`), never derived live from the staging script at build time.
+The pull request that added glib's exclusion said so directly — the change "only changes the
+staging script," and taking effect still needed the archive rebuilt, republished and its pinned
+checksum updated, none of which happened in that same change, or was verified against a real staged
+build before merging. Until every one of those steps runs, every existing install — and every fresh
+one built before the next native bump — keeps loading the unfixed bundle: a correct diff with zero
+shipped effect. Treat "excluded in the script" and "excluded in what ships" as two separate claims,
+and demand evidence for the second one specifically.
+
 ## Verifying it
 
 1. **List what you actually bundled**, and read it as a human — not as a dependency walk:
-   `ls <staged-native-dir>/lib`. Anything a stock desktop already provides is a candidate.
+   `STAGED_NATIVE_DIR=mpv-natives/linux-x64; ls "$STAGED_NATIVE_DIR/lib"`. Anything a stock desktop
+   already provides is a candidate.
 2. **Grep every call site of the fragile capability** and check each one has an `else`:
-   `grep -rn "isDesktopSupported\|Desktop.getDesktop" --include='*.kt' <src>`
+   `SRC=composeApp/src/jvmMain; grep -rn "isDesktopSupported\|Desktop.getDesktop" --include='*.kt' "$SRC"`
 3. **Log the resolved path** for each native at load, and read it in a packaged build.
 4. **Test on a host newer than the build environment.** A container image of the current
    distribution release is the cheapest reproduction — the break needs a system copy newer than

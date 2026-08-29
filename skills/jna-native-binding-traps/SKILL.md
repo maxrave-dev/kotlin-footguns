@@ -35,14 +35,13 @@ Native.load(
 )
 ```
 
-**Why you wanted that flag at all: loading publicly publishes the whole dependency closure.**
-JNA's default publishes the library's symbols — and those of everything it drags in — into the
-process-wide namespace, where unrelated natives (a rendering toolkit's own libraries) can bind to
-them by accident. One such accidental binding produced a hard native stop inside a library the
-application never calls, and only ever when the engine shared a process with the UI toolkit;
-the same library loaded in a bare JVM was stable. Loading privately keeps the symbols to your
-handle. This is also why the Windows branch above is *empty* rather than "some other flag":
-Windows never publishes exports process-wide, so there is nothing to guard against there.
+**Why you wanted that flag at all: loading publicly publishes the whole dependency closure.** JNA's
+default publishes the library's symbols — and those of everything it drags in — into the process-
+wide namespace, where unrelated natives (a rendering toolkit's own libraries) can bind to them by
+accident. One such accidental binding produced a hard native stop inside a library the application
+never calls, only when the engine shared a process with the UI toolkit; the same library loaded in a
+bare JVM was stable. Loading privately keeps the symbols to your handle — and is why the Windows
+branch above is *empty* rather than some other flag: Windows never publishes exports process-wide.
 
 **Always log the file that was actually opened, not the name you asked for.**
 
@@ -58,9 +57,8 @@ it the bug is invisible until a clean machine reports it.
 
 **A bare library name is not a file name.** JNA maps `"foo"` onto the platform convention
 (`libfoo.so`, `libfoo.dylib`, `foo.dll`). Bundles usually ship only the *versioned* file and no
-unversioned symlink, so every bare name misses and the loader quietly falls through to a system
-copy. Try absolute paths of the files you actually shipped **first**, plain names only as a
-fallback.
+unversioned symlink, so every bare name misses and the loader quietly falls through to a system copy.
+Try absolute paths of the files you actually shipped **first**, plain names only as a fallback.
 
 **Folklore about when the search-path property is read does not survive the bytecode.** A comment
 in the codebase this was mined from claimed the JNA path property is parsed once at class init,
@@ -74,11 +72,10 @@ fallback after the first open attempt fails. Two rules fall out:
   those reads land (a per-call method versus `static {}`) *is* the answer, and it is
   version-scoped, so re-run it on every JNA bump. Grepping for the internal field instead shows a
   `static {}` assignment and invites exactly the wrong conclusion.
-- `NativeLibrary.addSearchPath(name, dir)` remains the explicit per-library-name API and reads
-  clearest — use it because it is direct, not because "the property is too late". And do not
-  expect the JVM's own `System.loadLibrary` to honour the JNA property: it resolves through
-  `java.library.path` and the class loader, and nothing in the jar copies one property into the
-  other.
+- `NativeLibrary.addSearchPath(name, dir)` remains the explicit per-library-name API and reads clearest
+  — use it because it is direct, not because "the property is too late". And do not expect the JVM's own
+  `System.loadLibrary` to honour the JNA property: it resolves through `java.library.path` and the class
+  loader, and nothing in the jar copies one property into the other.
 
 **Structs are read by raw offset.** A field added, removed or reordered upstream is wrong bytes,
 never a clean link error. Two defences, both cheap:
@@ -116,3 +113,27 @@ args.forEachIndexed { i, a -> argv[i] = a }
 owns the result and must hand it back, mapping it to `String` loses the address — so it can never
 be handed back, and that memory is never reclaimed for the life of the process. Map it to
 `Pointer`, read the value out, then call the library's own release function.
+
+## Verifying it
+
+Run against the exact pinned jar: `JAR=$(find ~/.gradle/caches -name 'jna-5.19.1.jar' ! -iname '*sources*' | head -1)`. Step 2 additionally needs the repo checkout, not just the jar — run it from the repo root.
+
+1. **The three bytecode claims above hold on the pinned version, not just an older release:**
+
+   ```bash
+   javap -p -c -classpath "$JAR" com.sun.jna.NativeLibrary | grep -n 'open-flags\|Native.open'
+   javap -p -c -classpath "$JAR" com.sun.jna.NativeLibrary | awk '/^  (private|public|static).*\(.*\)|^  static \{\};/{m=$0} /jna.library.path/{print m}'
+   javap -classpath "$JAR" com.sun.jna.CallbackReference | head -2
+   ```
+
+   Pass condition: the option key flows into `Native.open(String, int)`; every `jna.library.path`
+   hit attributes to `loadLibrary(...)`, never `static {};`; `CallbackReference` extends `WeakReference<Callback>`.
+
+2. **A real consumer applies the documented POSIX-only branch, not just this file's prose:**
+
+   ```bash
+   grep -n -B3 "OPTION_OPEN_FLAGS to 2" core/media/media-jvm/src/main/java/com/simpmusic/media_jvm/mpv/MpvLibrary.kt
+   ```
+
+   Pass condition: the three lines of context show `if (Platform.isWindows())` / `emptyMap<...>()` /
+   `} else {` immediately above the `OPTION_OPEN_FLAGS` hit — the flag sits in the else branch.

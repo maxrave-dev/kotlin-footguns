@@ -52,8 +52,7 @@ progressJob = scope.launch {
 }
 ```
 
-Five seconds of granularity is the trade: worst case the user loses five seconds of position. A
-second coroutine on its own schedule buys nothing and adds a lifecycle to get wrong.
+Five seconds of granularity is the trade: worst case the user loses five seconds of position. A second coroutine on its own schedule buys nothing and adds a lifecycle to get wrong.
 
 **Cancel the previous loop before relaunching it.** The callback that starts this loop fires more
 than once per session — a resume, a transition between two internal players, a rebuffer that
@@ -80,9 +79,8 @@ val savedTracks = songRepository.getSavedQueue()...
 player.seekTo(index, savedPosition)                                        // uses the snapshot
 ```
 
-Any value read from storage *after* a player command has been issued is a value the player's own
-listeners may already have replaced. The rule is general: snapshot, then command, then use the
-snapshot.
+Any value read from storage *after* a player command has been issued may already be replaced by the
+player's own listeners. The rule is general: snapshot, then command, then use the snapshot.
 
 **The saved track may not be in the saved queue, and the index must still point at it.** The queue
 and the position are written by different triggers, so they can disagree — most often when the queue
@@ -99,30 +97,44 @@ val listTracks = if (index == -1) { index = 0; listOf(currentTrack) + savedTrack
 what makes the seek land on a timeline that exists. Seeking first appears to work with a short queue
 and drops silently with a long one, because the index is not there yet.
 
-**Use one save body with a blocking switch, not two copies.** Teardown must complete the write
-before the process goes away, while the periodic path must not block:
+**Seeking the engine does not republish the position the UI reads.** `player.seekTo(index,
+savedPosition)` moves the player, but the exposed state flow still holds whatever the ready-state
+transition captured earlier in this restore — before the seek — and nothing updates it after: nothing
+is playing yet, so the 100 ms progress loop that would otherwise catch it up never starts. Publish the
+restored value once, right after the seek:
 
 ```kotlin
-if (runBlocking) runBlocking { unit() } else scope.launch { unit() }
+player.seekTo(index, savedPosition)
+_simpleMediaState.value = SimpleMediaState.Progress(savedPosition)
 ```
 
-Two separate implementations drift — the async one gains a condition the blocking one never gets,
-and the bug only appears on the path that runs when the app is closing, which is the hardest to
-observe.
+**Duration needs the same fix as position, for the same reason, plus one guard further.** After a
+restore nothing is playing, so the 100 ms progress loop above never starts — and duration, not just
+position, rides that loop: it is only re-checked from the state-flow branches the player drives, none
+of which fire on a queue that never started playing. Seed it from metadata at the same moment you
+publish the restored position, before the player has opinions. Then guard every later write of it:
+the engine answers a large negative not-yet-known sentinel for duration until it has parsed the
+container, and "ready" can itself arrive from a loading callback before the engine is actually ready
+— so every duration write needs `newDuration.takeIf { it > 0L } ?: previous`, or a still-parsing
+container overwrites a perfectly good metadata duration with "not known yet".
+
+**Use one save body with a blocking switch, not two copies.** Teardown must complete the write before
+the process goes away, while the periodic path must not block — the `if (runBlocking) runBlocking {
+unit() } else scope.launch { unit() }` line in the heavy save above is both. Two separate
+implementations drift instead: the async one gains a condition the blocking one never gets, and the
+bug only appears on the path that runs when the app is closing, which is the hardest to observe.
 
 **Position and duration are not the same clock.** `contentPosition` excludes any inserted content;
-`currentPosition` does not. Persist the one the seek will consume, or a restore drifts by whatever
-was inserted before the playhead.
+`currentPosition` does not. Persist the one the seek will consume, or a restore drifts by whatever was inserted before the playhead.
 
 **Persisting is gated by a user setting, so the restore path must degrade cleanly.** With the setting
-off there is no stored queue at all — the restore must be a no-op, not an attempt to resume from a
-blank id, which enqueues an item with no source and stalls.
+off there is no stored queue at all — the restore must be a no-op, not an attempt to resume from a blank id, which enqueues an item with no source and stalls.
 
 ## Verifying it
 
 Start a long track, let it play in the background past the five-second mark, and end the process
-from the system rather than from the app so no lifecycle callback runs. Relaunch: the same track
-should resume within five seconds of where it stopped. Then repeat while a page of the queue is
-loading — the restored queue must still contain the playing track. Reading the stored values
-directly before and after each step is more reliable than watching the UI, since the UI is fed by
-the same restore you are testing.
+from the system rather than from the app so no lifecycle callback runs. Relaunch: the displayed time
+must already read where the track stopped in the first frame, not only once playback has run long
+enough to tick past it. Then repeat while a page of the queue is loading — the restored queue must
+still contain the playing track. Reading the stored values directly before and after each step is
+more reliable than watching the UI, since the UI is fed by the same restore you are testing.

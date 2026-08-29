@@ -97,3 +97,43 @@ or a little earlier, or to leave it until some later checkpoint. Each extension 
 in which a real stop is invisible to the platform, and the platform's view of your service is the
 only thing keeping playback alive. Set it as late as possible, clear it as early as possible, and
 make the clear unconditional in a `finally`-shaped position wherever the language allows.
+
+## Verifying it
+
+Run from the repository root; the flag and its call sites live under
+`core/media/media3/src/main/java/com/maxrave/media3/exoplayer/`.
+
+1. **The flag is `@Volatile`:**
+
+   ```bash
+   grep -n -B1 "var suppressPlaybackEnded" \
+     core/media/media3/src/main/java/com/maxrave/media3/exoplayer/DelegatingForwardingPlayer.kt
+   ```
+
+   Pass condition: the line above the declaration is `@Volatile`.
+
+2. **Every `= false` site maps to a real exit, and there is exactly one `= true`:**
+
+   ```bash
+   grep -n "suppressPlaybackEnded = " \
+     core/media/media3/src/main/java/com/maxrave/media3/exoplayer/CrossfadeExoPlayerAdapter.kt
+   ```
+
+   Run here: one `= true` (transition starts) and five `= false` sites, each at one of the four
+   listed exits (next player playing, reached ready, load failed, pause/stop). Fewer `= false`
+   sites than your state machine has exits is one that will get stuck.
+
+3. **The getter remaps state; the event stream stays untouched:**
+
+   ```bash
+   grep -n "override fun getPlaybackState\|override fun onPlaybackStateChanged" \
+     core/media/media3/src/main/java/com/maxrave/media3/exoplayer/DelegatingForwardingPlayer.kt
+   ```
+
+   Pass condition: only `getPlaybackState` is overridden. Filtering `onPlaybackStateChanged`
+   instead leaves the session's own pull-based query seeing the real `ENDED` state.
+
+4. **By hand — a debugger cannot reproduce this.** Turn on the device's strictest
+   battery-optimisation setting, start a queue of four-plus tracks, background the app, lock the
+   screen, let it run unattended. Correct: audio survives every track boundary. Regression:
+   playback stops exactly at a boundary (never mid-track) and the notification is gone on unlock.

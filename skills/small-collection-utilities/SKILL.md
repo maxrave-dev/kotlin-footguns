@@ -20,12 +20,6 @@ infix fun <E> Collection<E>.symmetricDifference(other: Collection<E>): Set<E> {
 Answers "which elements are on exactly one side" — additions and removals in one pass, when
 reconciling a stored list of ids against a freshly fetched one.
 
-**The trap: it is set arithmetic, so membership is all it can answer.** Duplicates collapse, order
-is gone, and an element that merely *moved* is on both sides and reports as unchanged. Run it over
-models rather than ids and the answer depends on the model's `equals` — for a data class that is
-every field, so editing a title reports the item as both removed and added. **Diff the ids, then
-compare matched pairs separately for content changes.** Two answers, two questions.
-
 ## Position index
 
 ```kotlin
@@ -38,11 +32,6 @@ fun <T> Iterable<T>.indexMap(): Map<T, Int> {
 
 Turns a repeated `indexOf` scan inside a loop into one pass plus constant-time lookups — the fix for
 sorting one list into another list's order.
-
-**The trap: the assignment is unconditional, so the last occurrence wins.** A repeated element maps
-to its final position and the map comes out shorter than the list, silently. Right for a list of
-unique ids, wrong for anything else; build it with `getOrPut` if you want the first occurrence. Same
-caveat as above on the key type — keying on a model means keying on its whole `equals`.
 
 ## A tolerant parse/serialize pair for timestamped tokens
 
@@ -63,19 +52,6 @@ stamps.forEachIndexed { index, match ->
 if (out.isEmpty()) return null      // the caller falls back to the coarser format
 ```
 
-**The trap is threefold, and the first two are silent.** *Matching stamp-and-text in one regex ties
-the text's shape to the pattern:* punctuation, another angle bracket, a script the character class
-never considered — all dropped, and the payload comes back looking merely short. Slicing to the next
-delimiter has no opinion about the text at all.
-
-*The fraction's digit count is its unit.* Read the digits as a number without checking `length` and
-every two-digit stamp lands at a tenth of where it belongs — early, plausible, and consistent enough
-to look like a tuning problem rather than a parsing one.
-
-*Every numeric field falls back rather than failing*, so "unparseable" and "zero" become one answer.
-A legitimate choice — one bad stamp should not lose the other forty — but keep the **whole-payload**
-failure as `null`, so the caller falls back to a coarser rendering instead of losing the screen.
-
 Write the serializer beside it, and **re-add whatever the parser stripped** — noticing which parser.
 The line-level parse strips the space after the line stamp, and its writer puts that back:
 
@@ -83,10 +59,6 @@ The line-level parse strips the space after the line stamp, and its writer puts 
 if (lines.isNullOrEmpty() || syncType != RICH) return null    // refuse to write another format
 return lines.joinToString("\n") { "[$stamp] ${it.payload}" }  // pad back the separator trim() ate
 ```
-
-The per-slice `trim()`s inside a line are restored by nothing — safe only while the tokens stay a
-render-time value. Serialize them and the words run together, so re-add the separator there too; and
-guard on the format tag either way, since writing a payload you were not given parses into nonsense.
 
 ## External link to deep link
 
@@ -101,27 +73,53 @@ fun String.toAppDeepLinkOrNull(): Uri? {
 }
 ```
 
-**The trap: the temptation is to handle the link, and the answer is to translate it.** Your existing
-deep-link handler already knows the special cases — which id prefixes mean which kind of collection,
-which need a prefix added — and a second handler starts as a copy and drifts the next time one of
-those rules changes. Rewrite the URL into your own scheme, hand it to the same entry point, and
-there is only ever one set of rules.
+## Traps
 
-- **Return `null` for anything unsupported**, so the caller can treat it as ordinary input — a pasted
-  link you do not handle should become a search, not a failure.
-- **Normalize the host before matching** (`lowercase()`, drop a leading `www.`) or the same link
-  works or fails depending on where it was copied. Reject non-`http(s)` text before parsing too.
-- **Decide the ambiguous case here, once.** A link carrying both an item and a collection has to
-  resolve to one; deciding in the translator is what makes every caller agree.
+**Symmetric difference is set arithmetic, so membership is all it can answer.** Duplicates collapse,
+order is gone, and an element that merely *moved* is on both sides and reports as unchanged. Run it
+over models rather than ids and the answer depends on the model's `equals` — for a data class that
+is every field, so editing a title reports the item as both removed and added. Diff the ids, then
+compare matched pairs separately for content changes: two answers, two questions.
+
+**A position index's assignment is unconditional, so the last occurrence wins.** A repeated element
+maps to its final position and the map comes out shorter than the list, silently. Right for a list
+of unique ids, wrong for anything else; build it with `getOrPut` if you want the first occurrence
+instead. Same caveat as above on the key type — keying on a model means keying on its whole `equals`.
+
+**A tolerant parser's trap is threefold, and the first two are silent.** *Matching stamp-and-text in
+one regex ties the text's shape to the pattern:* punctuation, another angle bracket, a script the
+character class never considered — all dropped, and the payload comes back looking merely short.
+Slicing to the next delimiter has no opinion about the text at all. *The fraction's digit count is
+its unit* — read the digits as a number without checking `length` and every two-digit stamp lands at
+a tenth of where it belongs, early and plausible enough to look like a tuning problem rather than a
+parsing one. *Every numeric field falls back rather than failing*, so "unparseable" and "zero" become
+one answer — legitimate, but keep the **whole-payload** failure as `null` so the caller falls back to
+a coarser rendering instead of losing the screen. The per-slice `trim()`s are restored by nothing,
+safe only while the tokens stay a render-time value: serialize the parsed list back to text and the
+words run together, so re-add the separator there too, and guard on the format tag either way, since
+writing a payload you were not given parses into nonsense.
+
+**The temptation with an external link is to handle it — the answer is to translate it.** Your
+existing deep-link handler already knows the special cases (which id prefixes mean which kind of
+collection, which need a prefix added), and a second handler starts as a copy and drifts the next
+time one of those rules changes. Rewrite the URL into your own scheme and hand it to the same entry
+point, so there is only ever one set of rules. Four details make the translator trustworthy: reject
+non-`http(s)` text before parsing at all; return `null` for anything unsupported, so a pasted link
+you do not handle becomes a search, not a failure; normalize the host before matching (`lowercase()`,
+drop a leading `www.`), or the same link works or fails depending on where it was copied; and decide
+the ambiguous case — a link carrying both an item and a collection — here, once, so every caller
+agrees instead of guessing differently.
 
 ## Verifying it
 
 The parse entry point should have exactly one failure mode, and it should be `null`:
 
 ```bash
-PARSER="path/to/YourParser.kt"
+PARSER=composeApp/src/commonMain/kotlin/com/maxrave/simpmusic/extension/RichSyncParser.kt   # your equivalent
 grep -nE "return null|throw |!!|require\(|checkNotNull\(" "$PARSER"
 ```
+
+Pass condition: every hit is `return null` — here, twice — never `throw`, `!!`, `require(` or `checkNotNull(`. Confirm it is the right file with `grep -n "Regex(\|fraction.length" "$PARSER"`: the timestamp regex and the fraction-length unit check both print.
 
 Every caller of a translator that can return `null` has to say what `null` means:
 

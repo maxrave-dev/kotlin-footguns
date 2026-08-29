@@ -296,3 +296,23 @@ Legend per row: `skill-name` — one-line gloss — primary evidence — A/B/C �
 216. `mirror-local-state-to-a-remote-account` — an opt-in mirror back-fills on enable, deliberately does not undo on disable, and reports three values so "not attempted" differs from "failed" — J
 
 **Updated in batch 6 (20):** `changelog-as-war-story` · `commit-archaeology-red-flags` · `compose-multiplatform-viewmodel-base` · `expect-actual-composable-capability` · `flatmaplatest-resubscribe-composite-key` · `force-dark-immersive-subtree` · `glance-widget-over-existing-state` · `import-format-contract-design` · `koin-viewmodel-scoping-traps` · `liquid-glass-backdrop` · `local-listening-analytics` · `material-symbols-icon-system` · `media3-custom-audio-processor` · `nav-tab-registration-drift` · `nested-flag-settings-auto-disable` · `realtime-biquad-dsp` · `response-to-domain-flow` · `responsive-gate-size-not-platform` · `retry-needs-backoff-and-cap` · `unknown-not-a-valid-score`
+
+## Batch 7 — delta mined 2026-08-29 from the v2.0.0 release sprint (8 new · 9 updated)
+
+> Window: app repo `21918e51..v2.0.0`, core submodule `4892ea9..8db86c9`. Pipeline: 4 write lanes, 2 adversarial verify lanes (28 findings, all repaired and re-verified), 2 fix lanes.
+
+**Word-timed lyrics and transliteration (3)**
+217. `word-timed-karaoke-lyrics` — per-word start times with ends inferred from the next word, a wall-clock wipe re-derived from discrete state so a backward seek cannot strand it, glow via shadow colour not alpha, pre-roll ordered before the active-line arm — G
+218. `script-aware-romanization-pipeline` — per-line script detection by proof not count, same-block language disambiguation by most-distinctive letters first, and the two dictionary-backed scripts being exactly the two properties a per-character table cannot express — M
+219. `combining-chars-break-char-literals` — a decomposed combining mark makes one visible letter two `Char`s, so it can be neither a char literal nor a per-`Char` map key; the stdlib answers the category question in common code but not grapheme segmentation — M
+
+**Capture, reel and state seeding (3)**
+220. `compose-capture-to-share-image` — record a subtree's draw into a graphics layer through a buffered channel, capture only already-resolved images, and keep the permission-free save path separate from the cache-and-share path — G
+221. `story-reel-auto-pager` — a frame-delta timer gated on press, busy and scroll at once; an empty long-press lambda that is load-bearing; the target page for tap decisions versus the settled page for display; every slide precomputed before the pager mounts — G
+222. `derive-the-flag-dont-store-and-correct-it` — a derived boolean stored in saveable state and corrected one frame later by an effect flashes on entry; derive it in composition from the data it depends on — I
+
+**Optional assets and hidden capability (2)**
+223. `on-demand-dictionary-asset` — ship a heavy optional asset as a staged, digest-checked, whitelist-extracted on-demand download that gates its feature until ready; a lazy that caches a returned null never retries — K
+224. `hidden-setting-does-not-clear-the-stored-value` — hiding a picker does not clear what it already stored, so every render site re-derives preference-and-capability itself; an effect that silently no-ops on older devices needs a positive capability boolean — G
+
+**Updated in batch 7 (9):** `playback-position-persist-restore` · `forwarding-player-hot-swap` · `queue-index-vs-shuffle-space` · `glance-layout-vocabulary` · `conveyor-desktop-packaging` · `bundled-native-soname-conflict` · `local-listening-analytics` · `structural-defensive-parsing` · `intent-flag-not-observed-state`

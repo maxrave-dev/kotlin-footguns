@@ -1,6 +1,6 @@
 ---
 name: intent-flag-not-observed-state
-description: A component that is committed to running but not yet running reports "not running", so anything that means intent must read the intent flag, not the observed one — and at a transition the intent flag must be waited for with a timeout rather than sampled inline. Use when one client's buffering hiccup stops a whole synchronised group, when a resume command is issued on every tick, or when a state read is wrong on exactly the transitions it exists for.
+description: A component that is committed to running but not yet running reports "not running", so anything that means intent must read the intent flag, not the observed one — and at a transition the intent flag must be waited for with a timeout rather than sampled inline. Use when one client's buffering hiccup stops a whole synchronised group, when appending to a queue in the background silences the track that was about to start, when a resume command is issued on every tick, or when a state read is wrong on exactly the transitions it exists for.
 ---
 
 # Two flags, and only one of them is a decision
@@ -77,6 +77,20 @@ without seeing the other is how a settle wait becomes either a busy loop or a st
 **The apply side needs the same rule, and it is easier to get wrong.** `if (remoteWantsPlay &&
 !component.isPlaying) play()` re-issues play on every tick of a buffering item, because the item
 stays observed-false the whole time. Compare against the local *intent* and the command fires once.
+
+**The same misread happens locally, with no synced group in sight.** A guard meant to keep an
+already-paused player paused has to read the intent flag too, not just the apply-side command above:
+
+```kotlin
+// wrong: also fires while the next item is still preparing
+if (!player.isPlaying && isAddToQueue) player.playWhenReady = false
+```
+
+`isPlaying` is false both while genuinely paused and while the next track is still buffering, so
+appending to the queue in the background during that ordinary buffering window reads as "paused" and
+writes `playWhenReady = false` onto a player that was committed to playing — the incoming track then
+loads silent. `if (!player.playWhenReady && isAddToQueue)` is both correct and idempotent:
+already-false stays false, and a player mid-buffer with real intent is left alone.
 
 **The intent flag is a property, not a stream, and that shapes every use of it.** Nothing tells you
 when it changes, so there are only two legitimate reads: a sample taken at a moment you know is

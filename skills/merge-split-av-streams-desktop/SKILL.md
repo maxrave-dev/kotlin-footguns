@@ -5,10 +5,11 @@ description: Playing a separate audio-only stream and video-only stream as ONE s
 
 # Merging split audio and video streams on desktop
 
+"av" here is audio/video.
+
 Adaptive sources hand out audio and video as **separate URLs**. On Android the player library has a
-merging media source for exactly this; a C media engine embedded in a JVM desktop app usually has
-an equivalent, in the form of an **inline edit-list URL** that names several streams and plays them
-simultaneously. "av" here is audio/video.
+merging media source for exactly this; a C media engine embedded in a JVM desktop app usually has an
+equivalent, in the form of an **inline edit-list URL** naming several streams that play simultaneously.
 
 The important property: the result is still **one source**, so it is one handle. Transport,
 position reporting and release are unchanged — there is no second handle to keep in sync.
@@ -30,10 +31,9 @@ internal fun quote(value: String): String =
     "%${value.toByteArray(Charsets.UTF_8).size}%$value"
 ```
 
-Verify the exact grammar against **your** engine's edit-list documentation before copying this —
-the header keyword, the separator and the quoting form are all engine-specific. Two things worth
-checking there specifically: whether the header must be first in its entry, and whether the URI
-form drops the header line the file form requires.
+Verify the exact grammar against **your** engine's edit-list documentation before copying this — the
+header keyword, separator and quoting form are all engine-specific. Check specifically whether the
+header must be first in its entry, and whether the URI form drops the header line the file form requires.
 
 ## Traps
 
@@ -45,11 +45,11 @@ counts UTF-16 units, so measure the UTF-8 encoding or every non-ASCII URL is quo
 length.
 
 **Copy only the documented core headers.** An engine's own resolution script often prefixes extra
-headers to each entry. If its documentation says those exist to serve that script's internal needs,
-are not part of the core format, and may change at any time, do not copy them. In the case this
-was mined from, the clipping header was provably a no-op for whole-file entries with no declared
-length; the chapter header was kept in reserve as the documented targeted fix should stray chapter
-markers ever show up. Add a header back for a symptom, not for completeness.
+headers to each entry. If its documentation says those serve that script's internal needs, are not
+part of the core format, and may change at any time, do not copy them. In the case this was mined
+from, the clipping header was provably a no-op for whole-file entries with no declared length; the
+chapter header was kept in reserve as the fix should stray chapter markers ever show up. Add a
+header back for a symptom, not for completeness.
 
 **A video-only stream carries no audio — merging it back is not optional.** If you stop asking your
 resolver for a pre-muxed single URL, what you get is a genuine video-only stream, and playing it
@@ -113,5 +113,28 @@ no symptom to notice: the feature silently keeps doing the thing you just "fixed
 before editing:
 
 ```bash
-grep -rn 'isCrossfading\|shouldCrossfade\|triggerCrossfade' --include='*.kt' <media-module>/
+MEDIA_SRC=core/media/media-jvm   # your equivalent
+grep -rn 'isCrossfading\|shouldCrossfade\|triggerCrossfade' --include='*.kt' "$MEDIA_SRC"/
 ```
+
+## Verifying it
+
+Run from the repo root; the module is under `core/media/media-jvm/`.
+
+1. **The length prefix counts UTF-8 bytes; every video-only branch also assigns an audio URL; the video-crossfade checks read the setting, not just the item:**
+
+   ```bash
+   grep -n "toByteArray(Charsets.UTF_8).size" core/media/media-jvm/src/main/java/com/simpmusic/media_jvm/mpv/MpvLibrary.kt
+   grep -n "value\.length" core/media/media-jvm/src/main/java/com/simpmusic/media_jvm/mpv/MpvLibrary.kt
+   grep -n "audioSlaveUrl = audioSlave\|audioSlaveUrl = audioUrl\|fun isNextTrackVideo\|fun isCurrentTrackVideo" core/media/media-jvm/src/main/java/com/simpmusic/media_jvm/mpv/MpvPlayerAdapter.kt
+   ```
+
+   Pass condition: the first grep finds the byte-count line; the second — the bad pattern — prints nothing; two `audioSlaveUrl = ...` hits; both video-check functions read `watchVideoEnabled &&` first.
+
+2. **The crossfade guard sits on every path that can start a transition — exactly two call sites:**
+
+   ```bash
+   grep -c "triggerCrossfadeTransition(nextIndex)" core/media/media-jvm/src/main/java/com/simpmusic/media_jvm/mpv/MpvPlayerAdapter.kt
+   ```
+
+   Pass condition: `2` — the position-poll path and the end-of-file handler, and no third caller.

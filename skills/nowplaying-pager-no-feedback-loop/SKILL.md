@@ -5,9 +5,8 @@ description: A now-playing artwork pager that both follows the player and drives
 
 # Now-playing pager without a feedback loop
 
-The pager is a **two-way** binding: it slides when the player advances on its own, and it seeks when
-the user settles on another page. Each direction writes a value the other watches, so the design is
-about keeping one of them quiet while the other talks.
+The pager is a **two-way** binding: it slides when the player advances, and it seeks when the user
+settles on another page. Each direction writes what the other watches — keep one quiet at a time.
 
 ## Traps
 

@@ -1,6 +1,6 @@
 ---
 name: hilt-to-koin-migration
-description: Move dependency injection from an annotation-processed compile-time framework (Hilt/Dagger) to the multiplatform runtime container (Koin) — the mechanical mapping for providers, view models and qualifiers, what happens to assisted injection, and the two failure modes the migration introduces: a graph that no longer fails at compile time, and a module definition that blocks the thread starting the container. Use when planning the migration, when a binding resolves to nothing at runtime after it, or when app start got slower afterwards.
+description: "Move dependency injection from an annotation-processed compile-time framework (Hilt/Dagger) to the multiplatform runtime container (Koin) — the mechanical mapping for providers, view models and qualifiers, what happens to assisted injection, and the two failure modes the migration introduces: a graph that no longer fails at compile time, and a module definition that blocks the thread starting the container. Use when planning the migration, when a binding resolves to nothing at runtime after it, or when app start got slower afterwards."
 ---
 
 # Migrating dependency injection to a multiplatform container
@@ -40,9 +40,7 @@ val repositoryModule = module {
 
 Type the definition by the **interface** (`single<AlbumRepository>`) or a consumer asking for the
 interface finds nothing — the implementation is likely `internal` anyway (`clean-arch-kmp-readiness`).
-
-Modules are then aggregated per layer behind one shared function, with a hook for the platform
-parts:
+Modules are aggregated per layer behind one shared function, with a hook for the platform parts:
 
 ```kotlin
 // adapted — two load calls merged, platform hook renamed
@@ -56,7 +54,8 @@ expect fun loadPlatformModules()
 ## Assisted injection has no direct equivalent
 
 Assisted injection existed for objects whose constructor is partly supplied by a framework — a
-worker handed a context and parameters at construction. The container has no equivalent. Two routes:
+worker handed a context and parameters at construction. The container has no direct equivalent, so
+the framework-supplied parameters stay in the constructor and only the injected one moves out:
 
 ```kotlin
 // adapted — the migration route: framework parameters stay plain, the injected one moves out
@@ -66,33 +65,26 @@ class NotifyWork(
 ) : CoroutineWorker(context, params), KoinComponent {
     private val repository: SomeRepository by inject()
 }
-
-// the container's own route, when you control the call site
-factory { (id: String) -> Presenter(id, get()) }
-val p: Presenter = get { parametersOf(someId) }
 ```
 
-The first is a genuine downgrade: the dependency leaves the constructor, so a test must stand up a
-container instead of passing a fake. Use `parametersOf` wherever *you* own construction.
+That is a genuine downgrade: the dependency leaves the constructor, so a test must stand up a
+container instead of passing a fake. Where *you* own the call site instead, `factory { (id: String)
+-> Presenter(id, get()) }` plus `get { parametersOf(someId) }` avoids it — though this codebase's own
+`factory` census (Verifying it, #2) shows it always took the first route.
 
 ## Traps
 
 **Nothing fails at compile time any more, and the replacement check is opt-in.** The processor used
 to reject a missing binding before the app ran; the container discovers it at the first resolve —
 which may be a screen three taps deep, in a release build, on a user's device. A module-verification
-test (`checkModules` / `verify()`, from the container's test artifact) is the replacement, and it is
-opt-in — put it on the migration checklist:
-```bash
-grep -rn "checkModules\|verify()" --include="*.kt" --include="*.kts" . --exclude-dir=build
-```
-A migration landing with no hits has quietly removed the only guarantee it had — the same family as
-`config-fails-open-verify-artifact`: absence of an error is not evidence of correctness.
+test (`checkModules` / `verify()`, from the container's test artifact) is the replacement, and a
+migration landing with no such test has quietly removed the only guarantee it had. Put it on the
+migration checklist and confirm it stuck — Verifying it, #1.
 
-**Anything blocking inside an eager definition runs when the container starts — if that module is
-loaded from inside `startKoin`.** Only `startKoin` creates eager instances by default; a
-`loadKoinModules` call made *after* start does not, so the same definition is harmless in one
-arrangement and blocks start-up in the other. The aggregation snippet above is invoked from inside
-the `startKoin { }` lambda here, which is what puts this definition on the start-up path:
+**Anything blocking inside an eager definition runs when the container starts — if that module is loaded from inside `startKoin`.**
+Only `startKoin` creates eager instances by default; a `loadKoinModules` call made *after* start does not, so the same definition
+is harmless in one arrangement and blocks start-up in the other. The aggregation snippet above is invoked from inside the
+`startKoin { }` lambda here, which is what puts this definition on the start-up path:
 
 ```kotlin
 // adapted — cache type and provider renamed
@@ -104,17 +96,12 @@ single<DiskCache>(qualifier = named(PLAYER_CACHE), createdAtStart = true) {
 }
 ```
 
-It works, it is sometimes unavoidable when a constructor demands a plain value and the setting is a
-flow, and it is invisible unless you profile start-up specifically. Keep such reads countable and
-off the eager path — `datastore-kmp-manager` covers the same tension from the storage side. Audit:
-```bash
-grep -rn "runBlocking" --include="*.kt" $(find . -type d -name di -not -path "*/build/*")
-```
+It works, it is sometimes unavoidable when a constructor demands a plain value and the setting is a flow, and it is invisible unless
+you profile start-up specifically. Keep such reads countable and off the eager path — `datastore-kmp-manager` covers the same tension from the storage side.
 
-**Whatever must happen before the container starts has to be moved above `startKoin` explicitly.**
-Eagerly-created singletons touch real resources — a database file, a preferences file, a lock — the
-instant the container starts, so a single-instance guard or a file migration that used to sit in the
-first screen is already too late. Ordering is the fix, and only one platform tends to expose it.
+**Whatever must happen before the container starts has to be moved above `startKoin` explicitly.** Eagerly-created singletons
+touch real resources — a database file, a lock — the instant the container starts, so a single-instance guard or a file migration
+that used to sit in the first screen is already too late. Ordering is the fix, and only one platform tends to expose it.
 
 **`named("…")` is a string, and a typo compiles.** Qualifier annotations were checked; qualifier
 strings are not. Declare each as a constant in a module both sides depend on, and reference it.
@@ -122,17 +109,31 @@ strings are not. Declare each as a constant in a module both sides depend on, an
 **Everything becoming `single` is a silent behaviour change.** Unscoped bindings under the previous
 framework produced a new instance per injection point; mapped onto `single` they get process
 lifetime, and anything holding per-use state now shares it. Check that `factory` exists at all —
-anchored to a **definition site**, or the search answers with prose: an unanchored `factory` matches
-comments, and `return@Factory` label returns in unrelated code, so a codebase with no `factory`
-definitions at all still looks like it has some:
-```bash
-grep -rnE '^[[:space:]]*factory(Of)?[[:space:]]*[<({]' --include="*.kt" . --exclude-dir=build
-```
-No output means every binding became process-wide — deliberate for repositories and clients, usually
-wrong for anything holding request- or screen-scoped state. That is the result on this codebase: the
-census is `single` and `viewModel` definitions only, with no `factory`, `factoryOf` or `scoped`.
+anchored to a **definition site** — Verifying it, #2 explains why and shows this codebase's result.
 
 **Do not put a platform component into the container to make injection convenient.** Registering an
 activity, a window or a service hands the container a reference that outlives it, so every consumer
 resolves a stale one after the first recreation. Pass it as a parameter instead. View-model wiring
 has its own set of these — see `koin-viewmodel-scoping-traps`.
+
+## Verifying it
+
+1. **The opt-in module-verification test actually exists somewhere in the migration:**
+   ```bash
+   grep -rn "checkModules\|verify()" --include="*.kt" --include="*.kts" . --exclude-dir=build
+   ```
+   Pass condition: at least one hit — none means the guarantee this migration lost at compile time was never replaced. This repository has none today: a real, currently-open gap, not a demo.
+
+2. **`factory` never appears (anchored, so a comment can't fool it), and every repository binding is typed by the interface the mapping table shows, not the concrete class:**
+   ```bash
+   grep -rnE '^[[:space:]]*factory(Of)?[[:space:]]*[<({]' --include="*.kt" . --exclude-dir=build
+   REPO_MODULE=core/data/src/commonMain/kotlin/com/maxrave/data/di/RepositoryModule.kt   # your equivalent
+   grep -c "single<[A-Za-z]*Repository>" "$REPO_MODULE"; grep -c "single {" "$REPO_MODULE"
+   ```
+   Pass condition: first grep empty — every binding here is `single`/`viewModel`, not `factory` — and the two counts after read 17 against 0: typed definitions only, none by concrete class.
+
+3. **The second failure mode — a definition blocking the thread that starts the container — is countable, and none of it is new:**
+   ```bash
+   grep -rn "runBlocking" --include="*.kt" $(find . -type d -name di -not -path "*/build/*")
+   ```
+   Pass condition: every hit is deliberate and already counted — here, 7, one of them the eager `createdAtStart` cache definition shown above. A hit outside that known count is the failure mode landing for real.

@@ -27,9 +27,8 @@ Nothing touches the database until the first two have passed.
 
 ## Traps
 
-**A file that parses but carries nothing is the wrong file, and reporting success is the worst
-outcome.** With unknown keys ignored — which you want, so a newer producer's file still imports —
-*any* JSON object decodes into an all-defaults envelope. Check before writing:
+**A file that parses but carries nothing is the wrong file, and reporting success is the worst outcome.** With unknown keys ignored
+— which you want, so a newer producer's file still imports — *any* JSON object decodes into an all-defaults envelope. Check before writing:
 
 ```kotlin
 if (data.songs.isEmpty() && data.playlists.isEmpty()) {
@@ -37,12 +36,10 @@ if (data.songs.isEmpty() && data.playlists.isEmpty()) {
 }
 ```
 
-A crash gets reported. "Imported 0 songs" does not: the user believes it worked and deletes the
-source file.
+A crash gets reported. "Imported 0 songs" does not: the user believes it worked and deletes the source file.
 
-**Row-at-a-time writing is not slow because of the rows, it is slow because of the commits.** If no
-DAO method takes a list and there is no ambient transaction, ten thousand inserts are ten thousand
-commits. Chunk them, and let the chunk size be the emit interval too:
+**Row-at-a-time writing is not slow because of the rows, it is slow because of the commits.** If no DAO method takes a list and
+there is no ambient transaction, ten thousand inserts are ten thousand commits. Chunk them, and let the chunk size be the emit interval too:
 
 ```kotlin
 private const val SONG_BATCH_SIZE = 500
@@ -55,14 +52,12 @@ data.songs.chunked(SONG_BATCH_SIZE).forEach { chunk ->
 }
 ```
 
-**Emit per chunk, never per row.** One emission per row floods a `StateFlow`-backed UI with updates
-it conflates away anyway, and the collection overhead can cost more than the inserts. Twenty
-emissions across a ten-thousand-row import is a smooth progress bar.
+**Emit per chunk, never per row.** One emission per row floods a `StateFlow`-backed UI with updates it conflates away anyway, and
+the collection overhead can cost more than the inserts. Twenty emissions across a ten-thousand-row import is a smooth progress bar.
 
-**Filter incoming references down to parents that exist, before inserting the children.** A child
-row pointing at a parent that is not in the file will be rejected by the foreign key — and because
-the parent insert is inside a transaction, that one bad reference takes the whole playlist with it.
-Build the lookup once and filter:
+**Filter incoming references down to parents that exist, before inserting the children.** A child row pointing at a parent that is
+not in the file will be rejected by the foreign key — and because the parent insert is inside a transaction, that one bad reference
+takes the whole playlist with it. Build the lookup once and filter:
 
 ```kotlin
 val songsById = data.songs.associateBy { it.videoId }          // once, not per playlist
@@ -70,12 +65,11 @@ val videoIds = playlist.videoIds.filter { songsById.containsKey(it) }
 skippedEntries += playlist.videoIds.size - videoIds.size
 ```
 
-`associateBy` up front is what keeps this linear; `data.songs.any { … }` inside the filter would make
-it quadratic and turn a fast import into a hang at exactly the sizes that matter.
+`associateBy` up front is what keeps this linear; `data.songs.any { … }` inside the filter would make it quadratic and turn a fast
+import into a hang at exactly the sizes that matter.
 
-**Renumber after filtering, or the gaps become real.** Positions come from the index in the
-*filtered* list, so they stay contiguous from 0. Taking the index from the original list leaves
-holes wherever a reference was dropped, and every later "insert at position n" is then wrong.
+**Renumber after filtering, or the gaps become real.** Positions come from the index in the *filtered* list, so they stay contiguous
+from 0. Taking the index from the original list leaves holes wherever a reference was dropped, and every later "insert at position n" is then wrong.
 
 **Count what you skipped and report it.** `skippedEntries` is the difference between what the file
 asked for and what was written. Surfacing it is the only way a half-empty playlist is a known
@@ -100,16 +94,14 @@ module does not depend on. Passing `invalidFileMessage` in keeps the dependency 
 right way; building the string in the repository is how the storage layer ends up depending on the
 UI.
 
-**Normalize any value that arrives from outside, do not trust it.** Fields written by another
-program are strings until proven otherwise:
+**Normalize any value that arrives from outside, do not trust it.** Fields written by another program are strings until proven otherwise:
 
 ```kotlin
 videoType = MusicVideoType.normalize(videoType) ?: ""
 ```
 
-A real known value is kept, anything else becomes the "unknown" the column already uses and is
-filled in later from the source of truth. Storing the raw string means every consumer must now
-handle whatever the producer invented.
+A real known value is kept, anything else becomes the "unknown" the column already uses and is filled in later from the source of
+truth. Storing the raw string means every consumer must now handle whatever the producer invented.
 
 **Enforce a parallel-array length rule at the boundary.** Where two lists are aligned by index,
 keep the second only when it matches:
@@ -118,10 +110,31 @@ keep the second only when it matches:
 artistId = artistId?.takeIf { it.size == (artistName?.size ?: 0) }
 ```
 
-Anything else reads past the end of the shorter list later, far from the import, where nothing
-suggests a file was involved.
+Anything else reads past the end of the shorter list later, far from the import, where nothing suggests a file was involved.
 
 **Pick the chunk size against a real file, and measure both halves.** Too small and you pay for
 commits; too large and one transaction holds a long write lock and the progress bar stalls in
 visible steps. **Verify by timing an import at your documented maximum** — the caps the file format
 promises are the size you must actually be fast at, not the size you tested with.
+
+## Verifying it
+
+Run against `core/data/src/commonMain/kotlin/com/maxrave/data/repository/ImportRepositoryImpl.kt` from the repository root.
+
+1. **The batch-size constant drives both the chunk and the emit, and the lookup is built once:**
+
+   ```bash
+   grep -n "SONG_BATCH_SIZE\|associateBy { it.videoId }" core/data/src/commonMain/kotlin/com/maxrave/data/repository/ImportRepositoryImpl.kt
+   ```
+
+   Pass condition: one `private const val SONG_BATCH_SIZE`, consumed by the same `.chunked(...)` that drives the `Importing(processed, total)` emit; `associateBy` appears once, outside any per-playlist loop.
+
+2. **The two boundary guards are verbatim, not paraphrased:**
+
+   ```bash
+   grep -n 'MusicVideoType.normalize(videoType)\|artistId?.takeIf' core/data/src/commonMain/kotlin/com/maxrave/data/repository/ImportRepositoryImpl.kt
+   ```
+
+   Pass condition: both lines are present — an unrecognised value falls back to `""`, and a mismatched-length array is dropped rather than read out of bounds later.
+
+3. **By hand: time an import at your documented maximum file size**, not the size you tested with. A stall followed by a jump to 100% means the chunk size is too large to feel responsive at that size.

@@ -1,6 +1,6 @@
 ---
 name: named-job-lifecycle-discipline
-description: One `var xJob: Job?` field per concern, cancel-before-relaunch as an invariant at every launch site, and teardown writes wrapped so a cancellation cannot stop them halfway. Use when periodic updates arrive several times per tick, when stale results from a previous item overwrite the current one, or when a long-lived object keeps working after it was released.
+description: "One `var xJob: Job?` field per concern, cancel-before-relaunch as an invariant at every launch site, and teardown writes wrapped so a cancellation cannot stop them halfway. Use when periodic updates arrive several times per tick, when stale results from a previous item overwrite the current one, or when a long-lived object keeps working after it was released."
 ---
 
 # Named job lifecycle discipline

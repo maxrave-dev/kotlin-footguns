@@ -19,11 +19,10 @@ the generated artifact.
 Reviewers checking "is the key spelled right / is it in the file" cannot catch a level error, because
 the level looks plausible in both placements. Neither can a diff of the config across versions.
 
-**"It should work" is not a state; "seen working" is.** A config-driven feature falls into three
-buckets: observed working, observed broken, and *never observed at all*. The third is where these
-bugs live, and it is invisible on a dashboard because nothing is red. Before shipping a key whose
-only effect is on the installed artifact, decide which bucket it is in — and if it is the third,
-get artifact-level proof.
+**"It should work" is not a state; "seen working" is.** A config-driven feature falls into three buckets:
+observed working, observed broken, and *never observed at all*. The third is where these bugs live, and
+it is invisible on a dashboard because nothing is red. Before shipping a key whose only effect is on the
+installed artifact, decide which bucket it is in — and if it is the third, get artifact-level proof.
 
 **The decisive experiment is two builds differing only in key placement.** This is what actually
 settles it, and it takes minutes:
@@ -93,3 +92,49 @@ The same reasoning applies well beyond packaging, and recognizing it is most of 
 The common signature is: **an operation that cannot fail, wired to a feature nobody observes.** The
 countermeasure is always the same — find the artifact of the operation (a built file, a row count, a
 log line) and assert on it, instead of asserting that the input was written correctly.
+
+## Verifying it
+
+These check the *method* — locating the fix and the fingerprint — without a packager; step 4 is the one check that genuinely needs a fresh build, and is marked as such. Run from the repo root — `conveyor.conf` is relative.
+
+1. **The historical misplacement does not regress: the key lives at the top level, and no per-OS
+   copy of it has crept back in:**
+
+   ```bash
+   CONF=conveyor.conf   # your packaging config
+   grep -n '^\s*url-schemes\s*=' "$CONF"
+   grep -nE '^\s*(mac|windows|linux)\.url-schemes\s*=' "$CONF"
+   awk '/^(app|mac|windows|linux) *\{/{blk=$1} /url-schemes *=/{print blk}' "$CONF"
+   ```
+
+   Pass condition: the first finds the assignment; the second prints nothing (no dotted per-OS form);
+   the awk line prints `app` — never `mac`/`windows`/`linux`.
+
+2. **The same silent-misplacement shape, a second time in the same file: entries sit *inside* the
+   `"Desktop Entry"` group, not beside it:**
+
+   ```bash
+   grep -n 'desktop-file\."Desktop Entry"' "$CONF"
+   grep -nE '^\s*desktop-file\.[A-Za-z]+\s*=' "$CONF"
+   ```
+
+   Pass condition: the first finds the group opener; the second — the broken sibling form this
+   file's comment describes replacing — finds nothing.
+
+3. **The fingerprint table names a real key, not a guess** — check it against any already-built
+   `.app` on the machine, since this project's own bundle isn't one. Most modern `Info.plist` files
+   are binary, so match with `-a` (else a plain `grep` silently reports "no matches" on one):
+
+   ```bash
+   APP=$(find /Applications -maxdepth 3 -iname "Info.plist" -exec grep -la "CFBundleURLTypes" {} \; 2>/dev/null | head -1)
+   plutil -p "$APP" | grep -A3 "CFBundleURLTypes"
+   ```
+
+   Pass condition: `$APP` is non-empty, and the printed block shows `CFBundleURLSchemes` nested
+   inside `CFBundleURLTypes` — the exact shape step 4's diff would look for.
+
+4. **BY HAND — requires a fresh packaging build, not run here:** package macOS twice, once with
+   `url-schemes` at the app level (current) and once moved back under `mac { }` (the historical
+   bug), then `diff` the two `Contents/Info.plist` files. Observable outcome: `CFBundleURLTypes` is
+   present in exactly one of the two builds — proof of which placement legally binds, matching the
+   file's own account of how this was originally settled.

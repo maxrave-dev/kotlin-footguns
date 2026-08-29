@@ -59,7 +59,11 @@ queue.listTracks.indexOfLast { it.trackId == player.currentMediaItem?.mediaId }
 A queue can legitimately hold the same track twice — the user queued it again, or a continuation
 page re-served it. Both copies then satisfy the predicate, so `indexOfFirst` highlights the wrong
 one and `indexOfLast` highlights the other wrong one. Ids identify *content*; positions identify
-*queue entries*. The playing entry is a position, so only a position can answer it.
+*queue entries*. The playing entry is a position, so only a position can answer it. Prefer a
+position the player already reports (its own order index) over a fresh id search — but validate it
+against the id before trusting it, and fall back to the id search when they disagree: during a queue
+rebuild the list and the player timeline are briefly out of step, and an unvalidated position can
+point at some other track entirely.
 
 **Only one direction of the map usually exists.** Adapters implement play-order → timeline first,
 because tapping a row needs it: `player.seekTo(getUnshuffledIndex(tappedRow), 0)`. Nothing needs the
@@ -87,6 +91,36 @@ check — comparing an index the composable computed itself — makes the visibl
 the one screen you tested and leaves it in the queue sheet, the mini player and the artwork pager,
 each of which computes its own. Any component that needs "which entry is playing" is a consumer of
 one value the player layer should publish.
+
+**Reconstructing an absolute index from a sliced sublist is a third index space, and it looks like
+arithmetic rather than state.** A queue view that renders only the *upcoming* tracks slices the full
+list first and then, at click time, adds the slice's own offset back to a local position to get an
+index the player understands:
+
+```kotlin
+// adapted — names generalized; wrong: index is local to `upcoming`, offset is read again separately
+val upcoming = queue.drop(offset)
+itemsIndexed(upcoming) { index, track ->
+    onClick = { actions.onSeekToQueueIndex(offset + index) }   // reconstructed, not carried
+}
+```
+
+A sibling view of the exact same queue that renders the *whole* list has nothing to reconstruct —
+`itemsIndexed` already hands it the absolute index — so it never shows this failure, which is the
+first clue when one screen mishandles a tap and its twin does not. Attach the absolute index to each
+element *before* slicing, so it survives the slice as data instead of being rebuilt from a value read
+a second time:
+
+```kotlin
+// adapted — names generalized; the key is simplified (the real one concatenates index and track id)
+val upcoming = queue.withIndex().drop(offset)   // index attached first, from the full list
+itemsIndexed(upcoming, key = { _, item -> item.index }) { _, item ->
+    onClick = { actions.onSeekToQueueIndex(item.index) }        // carried, not reconstructed
+}
+```
+
+A stale or wrong offset can still cut the slice at the wrong place; carrying the index means it can no
+longer make a visible row seek to a different track than the one it shows.
 
 ## Verifying it
 

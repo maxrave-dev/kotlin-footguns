@@ -12,9 +12,8 @@ a streaming source's metadata, from local analysis, from a tag — three things 
 2. **how much to bend the outgoing track's tempo** so both share a beat during the overlap,
 3. **how much to shift its pitch** so the two keys do not clash.
 
-Everything is applied to the **outgoing** track only, and dies with it — the bent player is
-released when the blend completes — so the incoming track plays at its natural tempo and pitch
-from its first solo moment.
+Everything is applied to the **outgoing** track only and dies with it, so the incoming track plays
+at its natural tempo and pitch from its first solo moment.
 
 ```
 base duration from current tempo   (slower track → longer blend)
@@ -39,7 +38,7 @@ while (ratio < 0.67f) ratio *= 2f
 
 The loops run in sequence, so a bad pair cannot make them alternate — what non-reciprocal bounds
 actually cost is symmetry: one direction gets folded into a different window than the other, and
-(70, 140) stops agreeing with (140, 70). Verify by feeding both pairs and checking both come back 1.0.
+(70, 140) stops agreeing with (140, 70).
 
 **Unknown must not read as compatible.** A key you cannot parse, and a key that is simply absent,
 must return the *same* fallback — and that fallback must be greater than 1.0, i.e. "blend longer
@@ -50,11 +49,10 @@ exactly on the tracks you have the least information about, which is precisely b
 val currentCode = keyToWheel(currentKey, currentScale) ?: return UNKNOWN_GAP_DEFAULT_FACTOR
 ```
 
-**Bend one side, not both.** Adjusting the incoming track leaves it playing at the wrong tempo
-after the transition ends, and you then need a second ramp to undo it. Adjusting only the outgoing
-one is self-cleaning: it is released when the blend completes. The ratio is therefore
-`nextTempo / currentTempo` applied to the outgoing player, so its effective tempo lands on the
-incoming track's.
+**Bend one side, not both.** Adjusting the incoming track leaves it at the wrong tempo after the
+transition and needs a second ramp to undo it; adjusting only the outgoing one is self-cleaning —
+released when the blend completes. The ratio is `nextTempo / currentTempo`, applied to the outgoing
+player, so its effective tempo lands on the incoming track's.
 
 **A linear ramp to the end matches tempo only when nobody can hear it.** With an equal-power
 volume curve the outgoing track is already far down by 70 % of the blend; a tempo ramp that
@@ -66,8 +64,7 @@ val ramp = linear * linear * (3f - 2f * linear)      // smoothstep: slow → fas
 val outSpeed = lerp(1.0f, targetSpeedRatio, ramp)
 ```
 
-with `rampPortion` around 0.6 — target reached inside the first 60 % of the blend, held for the
-rest, so the bulk of the audible overlap is beat-aligned.
+with `rampPortion` around 0.6 — target reached by 60 % of the blend and held, so most of the audible overlap is beat-aligned.
 
 **Quantise the tempo and pitch steps, and only push a changed value.** Rewriting playback
 parameters fifty times a transition with sub-percent differences retriggers the resampler and each
@@ -79,8 +76,8 @@ val q = quantize(rawSpeed * userSpeed)
 if (q != lastPushed) { player.playbackParameters = PlaybackParameters(q, qPitch); lastPushed = q }
 ```
 
-Note `rawSpeed * userSpeed`: the automatic ratio multiplies whatever the user already chose. Losing
-that factor silently discards their setting for the length of every transition.
+Note `rawSpeed * userSpeed`: the automatic ratio multiplies the user's own choice; drop it and their
+setting is silently discarded for the length of every transition.
 
 **Refuse a ratio outside the safe band instead of clamping it.** Past roughly ±25 % the bend is
 audible as a fault rather than as a mix. A clamped value is the worst of both — still audibly
@@ -105,8 +102,7 @@ val diff = abs(a.number - b.number)
 return minOf(diff, 12 - diff) + if (a.isMinor != b.isMinor) 1 else 0
 ```
 
-A distance ≤ 1 needs no shift at all — check that first and return early, before computing any
-pitch ratio.
+A distance ≤ 1 needs no shift — return early, before computing any pitch ratio.
 
 **A semitone is a ratio, not an offset.** `2^(n/12)`, i.e. `exp(ln(2) * n / 12)`. Search outward
 from the smallest shift (`-1, +1, -2, +2`) and take the first that brings the distance to ≤ 1;
@@ -120,3 +116,25 @@ rather than using symbols, and case varies. Normalise, then map to a semitone; r
 **Metadata arrives late, or not at all.** Load it lazily right before the calculation and cache it
 by track id, and have every derived value fall back cleanly — a fixed fallback duration, a ratio of
 1.0 — so a track with no analysis still transitions, just without the matching.
+
+## Verifying it
+
+Run from the repository root against `core/media/media3/src/main/java/com/maxrave/media3/exoplayer/CrossfadeExoPlayerAdapter.kt`.
+
+1. **The unknown-key fallback and the quantise-guard are in place, and the fold is symmetric:**
+
+   ```bash
+   grep -n "UNKNOWN_GAP_DEFAULT_FACTOR\|lastOutgoingSpeed\|playbackParameters =" \
+     core/media/media3/src/main/java/com/maxrave/media3/exoplayer/CrossfadeExoPlayerAdapter.kt
+   python3 -c "
+   for r in (140/70, 70/140):
+       while r > 1.5: r /= 2
+       while r < 0.67: r *= 2
+       print(r)"
+   ```
+
+   Pass condition: the factor is `> 1.0` (here `1.25`) and reused by name on the four listed paths; the
+   `playbackParameters =` write sits behind `if (qOutSpeed != lastOutgoingSpeed || …)`; the fold prints `1.0` for both ratios.
+
+2. **By hand:** queue two tracks with a large tempo gap and a compatible key, DJ crossfade on.
+   Listen around 60% into the transition — the outgoing beat should already match, not still slide.

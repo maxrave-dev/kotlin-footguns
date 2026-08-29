@@ -94,3 +94,47 @@ long ago.
 shutdown path, inside a `try`/`catch` — effects outlive the players they were attached to, and a
 release against a session that is already gone can throw; whatever teardown steps run after yours
 should not die for an effect that no longer exists.
+
+## Verifying it
+
+Run from the repository root; the implementation is
+`core/data/src/androidMain/kotlin/com/maxrave/data/mediaservice/MediaServiceHandlerImpl.kt`.
+
+1. **The session guard compares against the named constant, not a bare `0`:**
+
+   ```bash
+   grep -rn "AUDIO_SESSION_ID_UNSET" \
+     core/domain/src/commonMain/kotlin/com/maxrave/domain/data/player/PlayerConstants.kt \
+     core/data/src/androidMain/kotlin/com/maxrave/data/mediaservice/MediaServiceHandlerImpl.kt
+   ```
+
+   Pass condition: one `const val AUDIO_SESSION_ID_UNSET = 0`, and the handler's guard reads
+   `player.audioSessionId != PlayerConstants.AUDIO_SESSION_ID_UNSET` — never a literal `0`.
+
+2. **Out-of-range loudness is rejected to zero, never clamped to the boundary:**
+
+   ```bash
+   grep -n -A4 "loudnessDb.toMb()" \
+     core/data/src/androidMain/kotlin/com/maxrave/data/mediaservice/MediaServiceHandlerImpl.kt
+   ```
+
+   Pass condition: the branch is `if (it !in -2000..2000) 0 else it` — a reject-to-zero, not
+   `.coerceIn(-2000, 2000)`, which would apply a large wrong correction instead of none.
+
+3. **The second enhancer must be constructed, not only released** — grep for the assignment, not
+   the declaration:
+
+   ```bash
+   grep -n "secondLoudnessEnhancer *=" \
+     core/data/src/androidMain/kotlin/com/maxrave/data/mediaservice/MediaServiceHandlerImpl.kt
+   ```
+
+   Run against this codebase, the only hit is `secondLoudnessEnhancer = null` at teardown — no
+   constructor call anywhere. That is this exact trap, caught live in the mined source: the second
+   player of a crossfade never gets an enhancer, so every other track plays unnormalised. A codebase
+   without the bug shows at least one hit with `LoudnessEnhancer(` on the right-hand side too.
+
+4. **By hand: play three or more tracks back to back with normalisation on.** Log the session id
+   each enhancer is constructed against on every track change. Observable outcome: the logged id is
+   different every track, and perceived loudness stays consistent across the whole queue — not loud
+   on track one and unnormalised from track two on, which is what a reused enhancer sounds like.
