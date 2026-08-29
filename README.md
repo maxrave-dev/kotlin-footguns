@@ -4,6 +4,7 @@
 [SimpMusic](https://github.com/maxrave-dev/SimpMusic), the 10.8k-star cross-platform music app
 every lesson in this repository was mined from.
 
+[![skills.sh](https://skills.sh/b/maxrave-dev/kotlin-footguns)](https://skills.sh/maxrave-dev/kotlin-footguns)
 [![SimpMusic stars](https://img.shields.io/github/stars/maxrave-dev/SimpMusic?style=flat&logo=github&label=SimpMusic)](https://github.com/maxrave-dev/SimpMusic)
 [![GitHub followers](https://img.shields.io/github/followers/maxrave-dev?style=flat&logo=github&label=Followers)](https://github.com/maxrave-dev)
 [![Sponsor](https://img.shields.io/badge/GitHub_Sponsors-%E2%9D%A4-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/maxrave-dev)
