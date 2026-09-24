@@ -13,8 +13,8 @@ every lesson in this repository was mined from.
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue)](LICENSE)
 
 224 battle-tested traps mapping the footguns of Kotlin, Compose Multiplatform and desktop JVM
-development, packaged as nine agent skills. Mined from a production codebase, not written from
-documentation.
+development, packaged as nine agent skills plus a scanner that checks a change against them. Mined
+from a production codebase, not written from documentation.
 
 The traps are grouped into nine area skills in the open agent-skills format, readable by Claude
 Code and any coding agent that understands the format — and just as readable by a human. Each
@@ -71,7 +71,8 @@ generic core that applies to whichever API you are consuming.
 | [`engineering-method-footguns`](skills/engineering-method-footguns/SKILL.md) | 9 | Experiments, build logs, commit history, changelogs, removing a feature |
 
 Each area skill lists its traps under headings, each with the description that tells an agent
-when to open it. The whole index on one page is [CATALOG.md](CATALOG.md).
+when to open it. The whole index on one page is [CATALOG.md](CATALOG.md). A tenth skill,
+[`footgun-scan`](skills/footgun-scan/SKILL.md), checks code against the traps (below).
 
 ## Why nine skills and not 224
 
@@ -82,9 +83,35 @@ and lists whatever does not fit by name alone, least-used first. The 224 descrip
 about 124,000 characters and the names alone to 7,500, so at that budget every trap reached the
 agent as a bare name, and so did every other skill the user had installed, their own included.
 
-As nine area skills the listing is about 2,400 characters. The agent loads an area's index when
+As nine area skills plus the scanner the listing is about 2,700 characters. The agent loads an area's index when
 the work touches that area, sees every trap in it at once with the symptom that should send it to
 each one, and opens only the files that apply.
+
+## Scanning a change
+
+`footgun-scan` turns the traps into a check. It matches 32 patterns against the lines a change
+adds; each pattern is tied to one trap, and the agent opens that trap to confirm or dismiss every
+hit. Ask for it in plain words ("check my uncommitted Kotlin changes for footguns"), or run the
+script yourself, for example as a CI step:
+
+```bash
+python3 .claude/skills/footgun-scan/scripts/scan.py --base origin/main --fail
+```
+
+A hit is `likely` when the shape is wrong unless the exception its trap names holds, and `look`
+when it marks a place the trap says to inspect. Over the whole of SimpMusic and its core module the
+scanner raised 26 `likely` hits, and all 26 matched their trap on inspection: 22 vertical slides
+left at their half-height default, two fades from `Color.Transparent` into a colour, and two values
+spliced into migration SQL. The `look` hits are places to read, not verdicts.
+
+## Does it help?
+
+[`evals/`](evals/README.md) holds thirteen `claude plugin eval` cases, each run with the plugin and
+without it. With it, all twelve trap questions passed in every run and the agent opened the right
+trap file every time. Without it they averaged 0.56. On five of them the model already knew the
+lesson. On four it was confidently wrong: it described a Room connection-routing rule and a
+resource formatter that do not exist. The full table and its caveats are in
+[evals/README.md](evals/README.md).
 
 ## Anatomy of a trap
 
@@ -105,7 +132,7 @@ agent will not load in context.
 The area indexes and CATALOG.md are generated: after adding or editing a trap, run
 `python3 scripts/build_index.py`. It refreshes every index line from the trap's own description,
 fails if a file is unlisted, listed twice or missing, or if a cross-reference names a trap that
-does not exist, and reports how much of the listing budget the nine skills take. Add `--check`
+does not exist, and reports how much of the listing budget the skills take. Add `--check`
 to verify without writing.
 
 ## How the corpus was verified
@@ -159,12 +186,12 @@ Updates arrive with `/plugin marketplace update maxrave`.
 npx skills@latest add maxrave-dev/kotlin-footguns
 ```
 
-The installer lets you pick which of the nine area skills to take and which agents to install
-them for — Claude Code, Cursor, Codex, Copilot, Windsurf, Gemini and others. The files land in
+The installer lets you pick which of the ten skills (nine areas and the scanner) to take and which
+agents to install them for — Claude Code, Cursor, Codex, Copilot, Windsurf, Gemini and others. The files land in
 your repository as ordinary markdown you own and can edit; nothing updates behind your back.
 Pull newer versions when you want them with `npx skills update`.
 
-Either way, only the nine area descriptions sit in the agent's context on every turn. An area's
+Either way, only ten short descriptions sit in the agent's context on every turn. An area's
 index loads when the work touches that area, and a trap's file only when it applies. And because
 every file is plain markdown built around traps and verification commands, the corpus reads
 as an engineering reference without any agent at all.

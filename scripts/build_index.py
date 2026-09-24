@@ -67,6 +67,7 @@ def yaml_unsafe(raw):
 def main(check):
     errors = []
     areas = []
+    tools = []  # skills with no references/: listed in the budget and the catalog, not indexed
     traps = {}  # trap name -> area name
 
     for area in sorted(os.listdir(SKILLS)):
@@ -79,7 +80,10 @@ def main(check):
         if yaml_unsafe(fields.get("_raw_description", "")):
             errors.append(f"{area}: quote the description; strict YAML parsers reject it as written")
         ref_dir = os.path.join(SKILLS, area, "references")
-        on_disk = {f[:-3] for f in os.listdir(ref_dir) if f.endswith(".md")} if os.path.isdir(ref_dir) else set()
+        if not os.path.isdir(ref_dir):
+            tools.append(dict(name=area, description=fields.get("description", "")))
+            continue
+        on_disk = {f[:-3] for f in os.listdir(ref_dir) if f.endswith(".md")}
 
         title, sections, listed, out = None, [], [], []
         for line in lines:
@@ -136,7 +140,7 @@ def main(check):
                 if token not in traps and token not in NOT_TRAP_NAMES:
                     errors.append(f"{area['name']}/references/{f}: `{token}` names no trap")
 
-    catalog = render_catalog(areas)
+    catalog = render_catalog(areas, tools)
     old_catalog = ""
     if os.path.exists(CATALOG):
         with open(CATALOG, encoding="utf-8") as fh:
@@ -148,12 +152,13 @@ def main(check):
             with open(CATALOG, "w", encoding="utf-8") as fh:
                 fh.write(catalog)
 
-    listing = sum(len(a["name"]) + 4 + min(len(a["description"]), DESCRIPTION_CAP) for a in areas)
-    listing += max(0, len(areas) - 1)
-    print(f"{len(traps)} traps in {len(areas)} area skills")
+    skills = areas + tools
+    listing = sum(len(a["name"]) + 4 + min(len(a["description"]), DESCRIPTION_CAP) for a in skills)
+    listing += max(0, len(skills) - 1)
+    print(f"{len(traps)} traps in {len(areas)} area skills, plus {len(tools)} tool skill(s)")
     print(f"skill listing: {listing} characters, {100 * listing // LISTING_BUDGET_200K}% of the "
           f"{LISTING_BUDGET_200K}-character budget of a 200K-token context")
-    for a in areas:
+    for a in skills:
         if len(a["description"]) > DESCRIPTION_CAP:
             errors.append(f"{a['name']}: description is over {DESCRIPTION_CAP} characters and will be cut")
 
@@ -168,7 +173,7 @@ def covers(description):
     return head.split(": ", 1)[1] if ": " in head else head
 
 
-def render_catalog(areas):
+def render_catalog(areas, tools):
     total = sum(a["count"] for a in areas)
     out = [
         "# Catalog",
@@ -183,6 +188,9 @@ def render_catalog(areas):
     ]
     for a in areas:
         out.append(f"| [`{a['name']}`](skills/{a['name']}/SKILL.md) | {a['count']} | {covers(a['description'])} |")
+    if tools:
+        out += ["", "Tool skills, which work across the areas:", ""]
+        out += [f"- [`{t['name']}`](skills/{t['name']}/SKILL.md) — {t['description']}" for t in tools]
     for a in areas:
         out += ["", f"## {a['title']}", "", f"[`{a['name']}`](skills/{a['name']}/SKILL.md) · {a['count']} traps"]
         for section, names in a["sections"]:

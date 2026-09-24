@@ -1,0 +1,35 @@
+# One eval case per trap it names; see evals/README.md.
+schema_version: "1.1"
+name: vacuum-readonly
+description: Should lead to room-rawquery-readonly-vacuum in data-layer-footguns.
+tags: [data, trap]
+execution:
+  prompt: |
+    In our Kotlin Multiplatform app with Room 2.7, after deleting many rows I want to reclaim disk
+    space. I added a DAO method `@RawQuery suspend fun raw(query: RoomRawQuery): Int` and call it with
+    "VACUUM", but it fails with "attempt to write a readonly database". Running
+    "PRAGMA wal_checkpoint(TRUNCATE)" through the same method works fine. Why, and where should VACUUM run?
+  max_turns: 8
+  timeout_seconds: 300
+  allowed_tools: [Skill, Read, Glob, Grep]
+runs: 3
+graders:
+  - type: llm
+    name: names-the-mechanism-and-fix
+    criteria: |
+      Pass only if the response does BOTH:
+      1. Explains that Room executes @RawQuery methods on a read-only (reader) connection, because it cannot
+         tell whether an opaque raw statement writes, so VACUUM is refused, and that the checkpoint working
+         through the same method is not evidence that raw statements can write.
+      2. Recommends running VACUUM on a writer connection from the database class rather than the DAO
+         (for example via useWriterConnection or the database's writable connection), outside any transaction.
+  - type: tool_used
+    name: plugin-fired
+    tool: Skill
+    input_match: data-layer-footguns
+    arm: with-only
+  - type: tool_used
+    name: opened-the-trap
+    tool: Read
+    input_match: room-rawquery-readonly-vacuum
+    arm: with-only

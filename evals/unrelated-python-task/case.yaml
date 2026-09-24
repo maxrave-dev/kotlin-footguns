@@ -1,0 +1,26 @@
+# Precision check: an unrelated task the plugin should stay out of; see evals/README.md.
+schema_version: "1.1"
+name: unrelated-python-task
+description: An unrelated task; the plugin should stay out of it.
+tags: [negative]
+execution:
+  prompt: |
+    Write a Python function that parses ISO 8601 date strings with timezone offsets into
+    timezone-aware datetime objects, and show two example calls.
+  max_turns: 4
+  timeout_seconds: 180
+  allowed_tools: [Skill, Read, Glob, Grep]
+runs: 3
+graders:
+  - type: llm
+    name: answers-the-task
+    criteria: |
+      Pass if the response provides a correct Python function that returns timezone-aware datetimes for
+      ISO 8601 strings with offsets (for example using datetime.fromisoformat) and shows two example calls.
+  - type: tool_used
+    name: plugin-stayed-quiet
+    tool: Skill
+    input_match: footguns
+    min: 0
+    max: 0
+    arm: with-only

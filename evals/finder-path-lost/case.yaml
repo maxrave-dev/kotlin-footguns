@@ -1,0 +1,36 @@
+# One eval case per trap it names; see evals/README.md.
+schema_version: "1.1"
+name: finder-path-lost
+description: Should lead to macos-lsenvironment-path-pin in desktop-and-build-footguns.
+tags: [desktop, trap]
+execution:
+  prompt: |
+    Our packaged macOS Compose Desktop app shells out to ffmpeg that users install with Homebrew. It
+    works when the app is started from a terminal, but when opened from Finder or the Dock the call
+    fails with "command not found". Last release we added an environment variable to the app bundle's
+    Info.plist. Why is this happening, and how should we fix it?
+  max_turns: 8
+  timeout_seconds: 300
+  allowed_tools: [Skill, Read, Glob, Grep]
+runs: 3
+graders:
+  - type: llm
+    name: names-the-mechanism-and-fix
+    criteria: |
+      Pass only if the response does BOTH:
+      1. Identifies that declaring an LSEnvironment dictionary in Info.plist pins the launched process's
+         PATH to the bare system directories (/usr/bin:/bin:/usr/sbin:/sbin), so Homebrew locations such
+         as /opt/homebrew/bin and /usr/local/bin are missing for every spawned process.
+      2. Recommends resolving the tool by absolute path (or setting PATH explicitly in the spawned
+         process's environment), and auditing every external process the app spawns before adding
+         LSEnvironment.
+  - type: tool_used
+    name: plugin-fired
+    tool: Skill
+    input_match: desktop-and-build-footguns
+    arm: with-only
+  - type: tool_used
+    name: opened-the-trap
+    tool: Read
+    input_match: macos-lsenvironment-path-pin
+    arm: with-only

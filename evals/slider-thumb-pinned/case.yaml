@@ -1,0 +1,36 @@
+# One eval case per trap it names; see evals/README.md.
+schema_version: "1.1"
+name: slider-thumb-pinned
+description: Should lead to control-range-must-cover-stored-values in compose-screens-footguns.
+tags: [compose, trap]
+execution:
+  prompt: |
+    Our Compose settings screen has a Material 3 Slider for preamp gain with valueRange = -12f..12f,
+    copied from our equalizer band sliders. Some users imported presets whose preamp is -18 dB. For
+    them the thumb sits at the far left while the label next to it says -18.0 dB, and as soon as they
+    touch the slider the stored value becomes -12. What is wrong, and how should we fix it?
+  max_turns: 8
+  timeout_seconds: 300
+  allowed_tools: [Skill, Read, Glob, Grep]
+runs: 3
+graders:
+  - type: llm
+    name: names-the-mechanism-and-fix
+    criteria: |
+      Pass only if the response does BOTH:
+      1. Explains that an out-of-range value only clamps the thumb's drawn position, not the stored value,
+         so the thumb and the readout disagree, and that the first interaction silently overwrites the
+         stored value with the clamped one (data loss without a prompt).
+      2. Recommends sizing the range from the real distribution of values the slider can be handed
+         (stored, imported, migrated), i.e. widening it to cover them, or else clamping or rejecting
+         explicitly at import time instead of letting the control rewrite the value.
+  - type: tool_used
+    name: plugin-fired
+    tool: Skill
+    input_match: compose-screens-footguns
+    arm: with-only
+  - type: tool_used
+    name: opened-the-trap
+    tool: Read
+    input_match: control-range-must-cover-stored-values
+    arm: with-only

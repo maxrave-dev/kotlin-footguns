@@ -1,6 +1,6 @@
 ---
 name: kmp-architecture-footguns
-description: "Kotlin Multiplatform structure and language traps: module splits, expect/actual, Koin and ViewModel scoping, layers, version catalogs, erased overloads, Char limits. Use when shaping modules or DI, or code misbehaves on one platform."
+description: "Kotlin Multiplatform structure and language traps: module splits, expect/actual, Koin and ViewModel scoping, layers, version catalogs, erased overloads, Char and string-resource formatting limits. Use when shaping modules or DI, when a format specifier renders verbatim, or code misbehaves on one platform."
 ---
 
 # Kotlin Multiplatform architecture and language footguns
