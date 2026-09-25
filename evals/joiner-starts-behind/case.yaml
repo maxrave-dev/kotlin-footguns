@@ -1,0 +1,36 @@
+# One eval case per trap it names; see evals/README.md.
+schema_version: "1.1"
+name: joiner-starts-behind
+description: Should lead to joiner-catches-up-by-asking in media-playback-footguns.
+tags: [media, trap]
+execution:
+  prompt: |
+    We're building a listen-together feature in our Kotlin music app. When someone joins a room
+    mid-song, the relay server sends them the room's current state, which is the host's last play
+    command, and the joiner applies it. Joiners end up at the start of a song everyone else is halfway
+    through. Why does this happen, and what is the right fix?
+  max_turns: 8
+  timeout_seconds: 300
+  allowed_tools: [Skill, Read, Glob, Grep]
+runs: 3
+graders:
+  - type: llm
+    name: names-the-mechanism-and-fix
+    criteria: |
+      Pass only if the response does BOTH:
+      1. Explains that the state pushed on join is a replay of the host's last command, so its position
+         is frozen at the moment of that command and can be minutes old (e.g. the track change at position 0).
+      2. Recommends that the joiner actively ask the host or relay for the live, current position after
+         joining (a sync or catch-up request), and let that answer overwrite the pushed state.
+      Fail if the main fix is to extrapolate the old position forward from a timestamp without asking
+      for the live position, since that is silently wrong after any pause, seek or item change.
+  - type: tool_used
+    name: plugin-fired
+    tool: Skill
+    input_match: media-playback-footguns
+    arm: with-only
+  - type: tool_used
+    name: opened-the-trap
+    tool: Read
+    input_match: joiner-catches-up-by-asking
+    arm: with-only

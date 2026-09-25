@@ -12,12 +12,15 @@ every lesson in this repository was mined from.
 [![Blog](https://img.shields.io/badge/Blog-simpmusic.org-4B8BBE?logo=rss&logoColor=white)](https://www.simpmusic.org/blogs)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue)](LICENSE)
 
-224 battle-tested agent skills mapping the footguns of Kotlin, Compose Multiplatform and
-desktop JVM development. Mined from a production codebase, not written from documentation.
+224 battle-tested traps mapping the footguns of Kotlin, Compose Multiplatform and desktop JVM
+development, packaged as nine agent skills plus a scanner that checks a change against them. Mined
+from a production codebase, not written from documentation.
 
-Each skill is a standalone `SKILL.md` in the open agent-skills format, readable by Claude Code
-and any coding agent that understands the format — and just as readable by a human. The corpus
-is 27,000+ lines across 224 files, and in most of them the largest section is **Traps**: the
+The traps are grouped into nine area skills in the open agent-skills format, readable by Claude
+Code and any coding agent that understands the format — and just as readable by a human. Each
+area skill is an index of its traps; each trap is a standalone markdown file the agent opens
+when the work in front of it matches. The corpus is 27,000+ lines across 224 files, and in most
+of them the largest section is **Traps**: the
 specific ways a technique fails in practice, each paired with a way to verify the failure and
 the fix on your own tree.
 
@@ -46,51 +49,91 @@ and OpenAPK.
 That codebase spans territory most sample projects never touch: a native media engine bound
 over JNA, dual-player crossfade and DSP chains, a Room database at real-user scale, desktop
 packaging and code-signing for three operating systems, CI that builds all of it, and a UI
-written entirely in Compose. The skills are the distillation of that surface area.
+written entirely in Compose. The traps are the distillation of that surface area.
 
-The corpus itself is deliberately service-neutral. Skills teach architecture and failure
+The corpus itself is deliberately service-neutral. The traps teach architecture and failure
 modes, never the mechanics of any third-party service; no service names or vendor field names
-appear in any skill body. What was learned integrating specific services survives here as the
+appear in any trap file. What was learned integrating specific services survives here as the
 generic core that applies to whichever API you are consuming.
 
 ## What is inside
 
-| Group | Skills | Focus |
+| Area skill | Traps | Focus |
 |---|---|---|
-| A | 11 | Native code on the desktop JVM: bindings, bundling, loading, memory |
-| B | 13 | Desktop packaging, code signing, CI and build infrastructure |
-| C | 9 | Multiplatform module structure, dependency injection, architecture |
-| D | 18 | Media playback engine internals: players, crossfade, DSP, queues |
-| E | 11 | Databases and SQL: sweeps, migrations, query traps at scale |
-| F | 7 | Compose theming, palette extraction, gradients and scrims |
-| G | 11 | Compose components and interaction patterns |
-| H | 8 | Screens, navigation and adaptive layout |
-| I | 8 | Reactive state: Flow, StateFlow, ViewModel lifecycles |
-| J | 7 | Repository and data-layer patterns |
-| K | 8 | Background work, services and platform runtime behavior |
-| L | 12 | Consuming remote APIs: clients, parsing, auth flows, retries |
-| M | 10 | Kotlin and multiplatform utilities and language traps |
-| N | 7 | Engineering method: experiments, logs, changelogs, migrations |
-| Δ6 | 76 | Batch 6: sync rooms, equalizer and profile import, player style system, analytics, UI effects and platform lessons |
-| Δ7 | 8 | Batch 7: the v2.0.0 release sprint — word-timed lyrics, romanization, capture-to-image, story reel, on-demand assets |
+| [`desktop-and-build-footguns`](skills/desktop-and-build-footguns/SKILL.md) | 24 | Native code on the desktop JVM; desktop packaging, code signing, CI and build |
+| [`kmp-architecture-footguns`](skills/kmp-architecture-footguns/SKILL.md) | 25 | Multiplatform module structure, dependency injection, architecture; Kotlin language traps |
+| [`media-playback-footguns`](skills/media-playback-footguns/SKILL.md) | 33 | Players and crossfade, audio processing and DSP, queues, shared listening sessions |
+| [`data-layer-footguns`](skills/data-layer-footguns/SKILL.md) | 26 | Room and SQL at scale, migrations, repositories, caching and paging |
+| [`compose-visuals-footguns`](skills/compose-visuals-footguns/SKILL.md) | 35 | Theming and colour, gradients and scrims, effects and animation, charts |
+| [`compose-screens-footguns`](skills/compose-screens-footguns/SKILL.md) | 32 | Screens, navigation, adaptive layout, components and interaction |
+| [`state-and-background-footguns`](skills/state-and-background-footguns/SKILL.md) | 23 | Flow, StateFlow and ViewModel lifecycles; background work, services, platform runtime |
+| [`remote-api-footguns`](skills/remote-api-footguns/SKILL.md) | 17 | Clients and parsing, auth and retries, realtime sessions and wire protocols |
+| [`engineering-method-footguns`](skills/engineering-method-footguns/SKILL.md) | 9 | Experiments, build logs, commit history, changelogs, removing a feature |
 
-The full annotated index, with one line per skill and its primary evidence, is in
-[CATALOG.md](CATALOG.md).
+Each area skill lists its traps under headings, each with the description that tells an agent
+when to open it. The whole index on one page is [CATALOG.md](CATALOG.md). A tenth skill,
+[`footgun-scan`](skills/footgun-scan/SKILL.md), checks code against the traps (below).
 
-## Anatomy of a skill
+## Why nine skills and not 224
 
-Every file follows the same discipline:
+Until version 2.0 every trap was its own skill, and the set crowded out everything else in the
+agent's skill listing. Claude Code lists every installed skill's name and description on every
+turn, inside a budget of 1% of the context window (8,000 characters for a 200K-token window),
+and lists whatever does not fit by name alone, least-used first. The 224 descriptions came to
+about 124,000 characters and the names alone to 7,500, so at that budget every trap reached the
+agent as a bare name, and so did every other skill the user had installed, their own included.
 
-- **Frontmatter** — a `name` matching its folder and a `description` that states coverage,
-  the trigger for reaching for it, and the symptom it explains.
+As nine area skills plus the scanner the listing is about 2,700 characters. The agent loads an area's index when
+the work touches that area, sees every trap in it at once with the symptom that should send it to
+each one, and opens only the files that apply.
+
+## Scanning a change
+
+`footgun-scan` turns the traps into a check. It matches 32 patterns against the lines a change
+adds; each pattern is tied to one trap, and the agent opens that trap to confirm or dismiss every
+hit. Ask for it in plain words ("check my uncommitted Kotlin changes for footguns"), or run the
+script yourself, for example as a CI step:
+
+```bash
+python3 .claude/skills/footgun-scan/scripts/scan.py --base origin/main --fail
+```
+
+A hit is `likely` when the shape is wrong unless the exception its trap names holds, and `look`
+when it marks a place the trap says to inspect. Over the whole of SimpMusic and its core module the
+scanner raised 26 `likely` hits, and all 26 matched their trap on inspection: 22 vertical slides
+left at their half-height default, two fades from `Color.Transparent` into a colour, and two values
+spliced into migration SQL. The `look` hits are places to read, not verdicts.
+
+## Does it help?
+
+[`evals/`](evals/README.md) holds thirteen `claude plugin eval` cases, each run with the plugin and
+without it. With it, all twelve trap questions passed in every run and the agent opened the right
+trap file every time. Without it they averaged 0.56. On five of them the model already knew the
+lesson. On four it was confidently wrong: it described a Room connection-routing rule and a
+resource formatter that do not exist. The full table and its caveats are in
+[evals/README.md](evals/README.md).
+
+## Anatomy of a trap
+
+Every trap file follows the same discipline:
+
+- **Frontmatter** — a `name` matching its file name and a `description` that states coverage,
+  the trigger for reaching for it, and the symptom it explains. The area index repeats that
+  description, so the agent chooses on exactly this text.
 - **A short orientation** — the working pattern, with code where code is clearer than prose.
 - **Traps** — the dominant section: concrete failure modes, why each happens mechanically,
   and what to do instead.
 - **Verifying it** — commands to run against your own codebase to confirm or rule out each
   claim. Quantities are expressed as commands you run rather than numbers that go stale.
 
-Files are kept between 60 and 140 lines. A skill you cannot read in two minutes is a skill
-an agent will not load in context.
+Files are kept between 60 and 140 lines. A trap you cannot read in two minutes is a trap an
+agent will not load in context.
+
+The area indexes and CATALOG.md are generated: after adding or editing a trap, run
+`python3 scripts/build_index.py`. It refreshes every index line from the trap's own description,
+fails if a file is unlisted, listed twice or missing, or if a cross-reference names a trap that
+does not exist, and reports how much of the listing budget the skills take. Add `--check`
+to verify without writing.
 
 ## How the corpus was verified
 
@@ -116,9 +159,10 @@ evidence throughout; anything sourced only from prose is marked as such in the f
 In the final two batches alone this review raised close to thirty blocking findings — among
 them verification steps that passed on defective code and prescribed fixes that did not fix
 the case they named — every one repaired or refuted with recorded evidence before release. A
-closing sweep re-checked all 216 files for identifier leaks, structural consistency and
-cross-reference integrity, and confirmed the catalog matches the folders one to one in both
-directions.
+closing sweep after the first delta batch re-checked all 216 files then in the corpus for
+identifier leaks, structural consistency and cross-reference integrity, and confirmed the catalog
+matches the files one to one in both directions — a check `scripts/build_index.py` now repeats
+on every run.
 
 ## Installation
 
@@ -142,13 +186,13 @@ Updates arrive with `/plugin marketplace update maxrave`.
 npx skills@latest add maxrave-dev/kotlin-footguns
 ```
 
-The installer lets you pick which of the 224 skills to take and which agents to install them
-for — Claude Code, Cursor, Codex, Copilot, Windsurf, Gemini and others. The files land in
+The installer lets you pick which of the ten skills (nine areas and the scanner) to take and which
+agents to install them for — Claude Code, Cursor, Codex, Copilot, Windsurf, Gemini and others. The files land in
 your repository as ordinary markdown you own and can edit; nothing updates behind your back.
 Pull newer versions when you want them with `npx skills update`.
 
-Either way, each skill's `description` tells the agent when to load it, so installing many is
-cheap: a skill enters context only when its trigger matches the work at hand. And because
+Either way, only ten short descriptions sit in the agent's context on every turn. An area's
+index loads when the work touches that area, and a trap's file only when it applies. And because
 every file is plain markdown built around traps and verification commands, the corpus reads
 as an engineering reference without any agent at all.
 

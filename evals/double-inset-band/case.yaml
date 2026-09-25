@@ -1,0 +1,36 @@
+# One eval case per trap it names; see evals/README.md.
+schema_version: "1.1"
+name: double-inset-band
+description: Should lead to stacked-bars-double-consume-window-insets in compose-screens-footguns.
+tags: [compose, trap]
+execution:
+  prompt: |
+    Our Compose screen has a Column with our main TopAppBar and, only in selection mode, a second
+    Material 3 TopAppBar below it for selection actions. Both use their default windowInsets. In
+    selection mode a band of empty space exactly as tall as the status bar appears between the two
+    bars. Why, and what is the right fix?
+  max_turns: 8
+  timeout_seconds: 300
+  allowed_tools: [Skill, Read, Glob, Grep]
+runs: 3
+graders:
+  - type: llm
+    name: names-the-mechanism-and-fix
+    criteria: |
+      Pass only if the response does BOTH:
+      1. Explains that each bar applies the status-bar (window) insets independently: inset consumption
+         only propagates to a composable's descendants, not to its siblings, so the lower bar reserves the
+         status bar a second time.
+      2. Fixes it by deciding a single consumer, for example passing windowInsets = WindowInsets(0) to the
+         lower bar or having the container consume the insets once, and does NOT recommend cancelling the
+         gap with a negative offset or hardcoded padding.
+  - type: tool_used
+    name: plugin-fired
+    tool: Skill
+    input_match: compose-screens-footguns
+    arm: with-only
+  - type: tool_used
+    name: opened-the-trap
+    tool: Read
+    input_match: stacked-bars-double-consume-window-insets
+    arm: with-only

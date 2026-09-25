@@ -1,0 +1,34 @@
+# One eval case per trap it names; see evals/README.md.
+schema_version: "1.1"
+name: not-in-null-control
+description: Should lead to sql-not-in-nullable-trap in data-layer-footguns.
+tags: [data, control]
+execution:
+  prompt: |
+    In our Kotlin Android app (Room), this DAO query deletes nothing even though I can see orphan
+    playlists in the database:
+    @Query("DELETE FROM playlist WHERE id NOT IN (SELECT remotePlaylistId FROM local_playlist)")
+    Why, and how should I fix it?
+  max_turns: 8
+  timeout_seconds: 300
+  allowed_tools: [Skill, Read, Glob, Grep]
+runs: 3
+graders:
+  - type: llm
+    name: names-the-mechanism-and-fix
+    criteria: |
+      Pass only if the response does BOTH:
+      1. Explains that if the subquery returns any NULL (remotePlaylistId is nullable), `id NOT IN (...)`
+         evaluates to NULL rather than TRUE for every row, so the statement matches zero rows without an error.
+      2. Fixes it by filtering NULLs in the subquery (WHERE remotePlaylistId IS NOT NULL) or rewriting
+         with NOT EXISTS or a LEFT JOIN ... IS NULL.
+  - type: tool_used
+    name: plugin-fired
+    tool: Skill
+    input_match: data-layer-footguns
+    arm: with-only
+  - type: tool_used
+    name: opened-the-trap
+    tool: Read
+    input_match: sql-not-in-nullable-trap
+    arm: with-only

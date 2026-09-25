@@ -1,0 +1,37 @@
+# One eval case per trap it names; see evals/README.md.
+schema_version: "1.1"
+name: spinner-over-playing-audio
+description: Should lead to stateflow-conflation-inverts-state in state-and-background-footguns.
+tags: [state, trap]
+execution:
+  prompt: |
+    In our Kotlin player screen a loading spinner sometimes stays on top of audio that is already
+    playing, as if the loading flag clears at the wrong moment. The screen collects a MutableStateFlow
+    of player state that we update from the player's listener callbacks. What could cause that, and
+    how should the state be written?
+  max_turns: 8
+  timeout_seconds: 300
+  allowed_tools: [Skill, Read, Glob, Grep]
+runs: 3
+graders:
+  - type: llm
+    name: names-the-mechanism-and-fix
+    criteria: |
+      Pass only if the response does BOTH:
+      1. Identifies that a callback (or a helper it calls, such as a stop/cancel function) writes the
+         StateFlow more than once per event, and because StateFlow is conflated and keeps only the latest
+         value, whichever write comes last is what collectors see, so write order can publish Loading after
+         buffering has actually finished.
+      2. Recommends writing the state once per event, decided at the end so it matches the event
+         (and/or making helpers stop publishing and cancelling a periodic emitter before relaunching it).
+      A response that only suggests debouncing the spinner or adding a delay does not pass.
+  - type: tool_used
+    name: plugin-fired
+    tool: Skill
+    input_match: state-and-background-footguns
+    arm: with-only
+  - type: tool_used
+    name: opened-the-trap
+    tool: Read
+    input_match: stateflow-conflation-inverts-state
+    arm: with-only

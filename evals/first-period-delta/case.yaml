@@ -1,0 +1,33 @@
+# One eval case per trap it names; see evals/README.md.
+schema_version: "1.1"
+name: first-period-delta
+description: Should lead to delta-absent-not-infinite in compose-visuals-footguns.
+tags: [compose, trap]
+execution:
+  prompt: |
+    Our Compose stats screen shows the week-over-week change in listening time. When last week had
+    zero minutes we display "+100%" and sometimes "Infinity%". What should the UI show instead, and
+    how should I compute it?
+  max_turns: 8
+  timeout_seconds: 300
+  allowed_tools: [Skill, Read, Glob, Grep]
+runs: 3
+graders:
+  - type: llm
+    name: names-the-mechanism-and-fix
+    criteria: |
+      Pass only if the response does BOTH:
+      1. Says a change against an empty or zero baseline must be rendered as absence: no percentage at
+         all, or a neutral label such as "new", and never +100% or an infinity.
+      2. Models the missing baseline explicitly in the computation (for example returning a nullable
+         delta when the baseline is zero or absent) and guards the division.
+  - type: tool_used
+    name: plugin-fired
+    tool: Skill
+    input_match: compose-visuals-footguns
+    arm: with-only
+  - type: tool_used
+    name: opened-the-trap
+    tool: Read
+    input_match: delta-absent-not-infinite
+    arm: with-only

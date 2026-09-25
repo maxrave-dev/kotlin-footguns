@@ -1,0 +1,38 @@
+# One eval case per trap it names; see evals/README.md.
+schema_version: "1.1"
+name: service-stops-between-tracks
+description: Should lead to fgs-state-ended-trap in media-playback-footguns.
+tags: [media, trap]
+execution:
+  prompt: |
+    Our Android music app uses Media3 with a MediaSessionService. For crossfade we create a new
+    ExoPlayer for every track and swap it in behind a ForwardingPlayer. On some Xiaomi and Huawei
+    phones background playback stops partway through the queue and the notification disappears
+    between tracks. It never happens on my Pixel. What is the likely cause, and how do I fix it?
+  max_turns: 8
+  timeout_seconds: 300
+  allowed_tools: [Skill, Read, Glob, Grep]
+runs: 3
+graders:
+  - type: llm
+    name: names-the-mechanism-and-fix
+    criteria: |
+      Pass only if the response does BOTH:
+      1. Identifies that during the swap the outgoing player reports the ENDED playback state for a brief
+         window, and that the media session/service reads that state and drops foreground status (the
+         notification goes away), which aggressive OEM power management then exploits to freeze or kill
+         the app before the next player starts.
+      2. Proposes suppressing or remapping the ended state at the ForwardingPlayer boundary while a swap
+         is in progress and a next item exists (for example reporting buffering or ready instead), and
+         clearing that suppression afterwards.
+      Generic advice about battery optimisation whitelisting or wake locks alone does not pass.
+  - type: tool_used
+    name: plugin-fired
+    tool: Skill
+    input_match: media-playback-footguns
+    arm: with-only
+  - type: tool_used
+    name: opened-the-trap
+    tool: Read
+    input_match: fgs-state-ended-trap
+    arm: with-only

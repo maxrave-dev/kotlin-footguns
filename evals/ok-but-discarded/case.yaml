@@ -1,0 +1,34 @@
+# One eval case per trap it names; see evals/README.md.
+schema_version: "1.1"
+name: ok-but-discarded
+description: Should lead to api-ok-but-ignored in remote-api-footguns.
+tags: [api, trap]
+execution:
+  prompt: |
+    Our Kotlin app submits listening events to a third-party web API. Every call returns HTTP 200 with
+    a body whose status is "ok", our client logs success, yet nothing ever appears on the user's
+    profile on that service. What should our client be doing differently?
+  max_turns: 8
+  timeout_seconds: 300
+  allowed_tools: [Skill, Read, Glob, Grep]
+runs: 3
+graders:
+  - type: llm
+    name: names-the-mechanism-and-fix
+    criteria: |
+      Pass only if the response does BOTH:
+      1. Raises that a successful status can still mean the submission was accepted but discarded, with
+         the reason carried in a secondary or nested per-item field of the response rather than in the
+         HTTP status.
+      2. Recommends parsing that field on every write, modelling "accepted but discarded" as its own
+         outcome distinct from success and failure, and logging or surfacing discards loudly.
+  - type: tool_used
+    name: plugin-fired
+    tool: Skill
+    input_match: remote-api-footguns
+    arm: with-only
+  - type: tool_used
+    name: opened-the-trap
+    tool: Read
+    input_match: api-ok-but-ignored
+    arm: with-only

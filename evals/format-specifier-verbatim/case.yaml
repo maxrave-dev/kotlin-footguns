@@ -1,0 +1,36 @@
+# One eval case per trap it names; see evals/README.md.
+schema_version: "1.1"
+name: format-specifier-verbatim
+description: Should lead to string-resource-format-limits in kmp-architecture-footguns.
+tags: [kmp, trap]
+execution:
+  prompt: |
+    In our Compose Multiplatform app using compose-resources, strings.xml contains
+    <string name="peak_hour">%1$02d:00</string> and <string name="coverage">%1$d%% classified</string>.
+    On screen we see the literal text "%1$02d:00" and "%1$d%% classified" instead of formatted values.
+    What is going on, and how should we fix it?
+  max_turns: 8
+  timeout_seconds: 300
+  allowed_tools: [Skill, Read, Glob, Grep]
+runs: 3
+graders:
+  - type: llm
+    name: names-the-mechanism-and-fix
+    criteria: |
+      Pass only if the response does BOTH:
+      1. Explains that the multiplatform resource formatter only substitutes plain positional
+         placeholders such as %1$s and %1$d, and does not support flags or width (like 02) or an escaped
+         percent sign (%%), so those specifiers reach the screen as literal text.
+      2. Recommends finishing the values in Kotlin (for example padStart for the hour, building the
+         percent text in code) and passing the finished strings to a resource that only joins them
+         (for example "%1$s").
+  - type: tool_used
+    name: plugin-fired
+    tool: Skill
+    input_match: kmp-architecture-footguns
+    arm: with-only
+  - type: tool_used
+    name: opened-the-trap
+    tool: Read
+    input_match: string-resource-format-limits
+    arm: with-only
