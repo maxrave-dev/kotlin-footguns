@@ -12,14 +12,14 @@ every lesson in this repository was mined from.
 [![Blog](https://img.shields.io/badge/Blog-simpmusic.org-4B8BBE?logo=rss&logoColor=white)](https://www.simpmusic.org/blogs)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue)](LICENSE)
 
-224 battle-tested traps mapping the footguns of Kotlin, Compose Multiplatform and desktop JVM
-development, packaged as nine agent skills plus a scanner that checks a change against them. Mined
+227 battle-tested traps mapping the footguns of Kotlin, Compose Multiplatform and desktop JVM
+development, packaged as ten agent skills plus a scanner that checks a change against them. Mined
 from a production codebase, not written from documentation.
 
-The traps are grouped into nine area skills in the open agent-skills format, readable by Claude
+The traps are grouped into ten area skills in the open agent-skills format, readable by Claude
 Code and any coding agent that understands the format — and just as readable by a human. Each
 area skill is an index of its traps; each trap is a standalone markdown file the agent opens
-when the work in front of it matches. The corpus is 27,000+ lines across 224 files, and in most
+when the work in front of it matches. The corpus is 28,000+ lines across 227 files, and in most
 of them the largest section is **Traps**: the
 specific ways a technique fails in practice, each paired with a way to verify the failure and
 the fix on your own tree.
@@ -67,14 +67,15 @@ generic core that applies to whichever API you are consuming.
 | [`compose-visuals-footguns`](skills/compose-visuals-footguns/SKILL.md) | 35 | Theming and colour, gradients and scrims, effects and animation, charts |
 | [`compose-screens-footguns`](skills/compose-screens-footguns/SKILL.md) | 32 | Screens, navigation, adaptive layout, components and interaction |
 | [`state-and-background-footguns`](skills/state-and-background-footguns/SKILL.md) | 23 | Flow, StateFlow and ViewModel lifecycles; background work, services, platform runtime |
+| [`webview-footguns`](skills/webview-footguns/SKILL.md) | 3 | WebView on low-RAM phones and provider-less devices: startup, renderer death, AndroidView lifecycle, cookies |
 | [`remote-api-footguns`](skills/remote-api-footguns/SKILL.md) | 17 | Clients and parsing, auth and retries, realtime sessions and wire protocols |
 | [`engineering-method-footguns`](skills/engineering-method-footguns/SKILL.md) | 9 | Experiments, build logs, commit history, changelogs, removing a feature |
 
 Each area skill lists its traps under headings, each with the description that tells an agent
-when to open it. The whole index on one page is [CATALOG.md](CATALOG.md). A tenth skill,
+when to open it. The whole index on one page is [CATALOG.md](CATALOG.md). An eleventh skill,
 [`footgun-scan`](skills/footgun-scan/SKILL.md), checks code against the traps (below).
 
-## Why nine skills and not 224
+## Why ten skills and not 227
 
 Until version 2.0 every trap was its own skill, and the set crowded out everything else in the
 agent's skill listing. Claude Code lists every installed skill's name and description on every
@@ -83,7 +84,7 @@ and lists whatever does not fit by name alone, least-used first. The 224 descrip
 about 124,000 characters and the names alone to 7,500, so at that budget every trap reached the
 agent as a bare name, and so did every other skill the user had installed, their own included.
 
-As nine area skills plus the scanner the listing is about 2,700 characters. The agent loads an area's index when
+As ten area skills plus the scanner the listing is about 2,900 characters. The agent loads an area's index when
 the work touches that area, sees every trap in it at once with the symptom that should send it to
 each one, and opens only the files that apply.
 
@@ -186,12 +187,12 @@ Updates arrive with `/plugin marketplace update maxrave`.
 npx skills@latest add maxrave-dev/kotlin-footguns
 ```
 
-The installer lets you pick which of the ten skills (nine areas and the scanner) to take and which
+The installer lets you pick which of the eleven skills (ten areas and the scanner) to take and which
 agents to install them for — Claude Code, Cursor, Codex, Copilot, Windsurf, Gemini and others. The files land in
 your repository as ordinary markdown you own and can edit; nothing updates behind your back.
 Pull newer versions when you want them with `npx skills update`.
 
-Either way, only ten short descriptions sit in the agent's context on every turn. An area's
+Either way, only eleven short descriptions sit in the agent's context on every turn. An area's
 index loads when the work touches that area, and a trap's file only when it applies. And because
 every file is plain markdown built around traps and verification commands, the corpus reads
 as an engineering reference without any agent at all.
