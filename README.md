@@ -12,14 +12,14 @@ every lesson in this repository was mined from.
 [![Blog](https://img.shields.io/badge/Blog-simpmusic.org-4B8BBE?logo=rss&logoColor=white)](https://www.simpmusic.org/blogs)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue)](LICENSE)
 
-227 battle-tested traps mapping the footguns of Kotlin, Compose Multiplatform and desktop JVM
+228 battle-tested traps mapping the footguns of Kotlin, Compose Multiplatform and desktop JVM
 development, packaged as ten agent skills plus a scanner that checks a change against them. Mined
 from a production codebase, not written from documentation.
 
 The traps are grouped into ten area skills in the open agent-skills format, readable by Claude
 Code and any coding agent that understands the format — and just as readable by a human. Each
 area skill is an index of its traps; each trap is a standalone markdown file the agent opens
-when the work in front of it matches. The corpus is 28,000+ lines across 227 files, and in most
+when the work in front of it matches. The corpus is 28,000+ lines across 228 files, and in most
 of them the largest section is **Traps**: the
 specific ways a technique fails in practice, each paired with a way to verify the failure and
 the fix on your own tree.
@@ -64,7 +64,7 @@ generic core that applies to whichever API you are consuming.
 | [`kmp-architecture-footguns`](skills/kmp-architecture-footguns/SKILL.md) | 25 | Multiplatform module structure, dependency injection, architecture; Kotlin language traps |
 | [`media-playback-footguns`](skills/media-playback-footguns/SKILL.md) | 33 | Players and crossfade, audio processing and DSP, queues, shared listening sessions |
 | [`data-layer-footguns`](skills/data-layer-footguns/SKILL.md) | 26 | Room and SQL at scale, migrations, repositories, caching and paging |
-| [`compose-visuals-footguns`](skills/compose-visuals-footguns/SKILL.md) | 35 | Theming and colour, gradients and scrims, effects and animation, charts |
+| [`compose-visuals-footguns`](skills/compose-visuals-footguns/SKILL.md) | 36 | Theming and colour, gradients and scrims, effects and animation, charts |
 | [`compose-screens-footguns`](skills/compose-screens-footguns/SKILL.md) | 32 | Screens, navigation, adaptive layout, components and interaction |
 | [`state-and-background-footguns`](skills/state-and-background-footguns/SKILL.md) | 23 | Flow, StateFlow and ViewModel lifecycles; background work, services, platform runtime |
 | [`webview-footguns`](skills/webview-footguns/SKILL.md) | 3 | WebView on low-RAM phones and provider-less devices: startup, renderer death, AndroidView lifecycle, cookies |
@@ -75,7 +75,7 @@ Each area skill lists its traps under headings, each with the description that t
 when to open it. The whole index on one page is [CATALOG.md](CATALOG.md). An eleventh skill,
 [`footgun-scan`](skills/footgun-scan/SKILL.md), checks code against the traps (below).
 
-## Why ten skills and not 227
+## Why ten skills and not 228
 
 Until version 2.0 every trap was its own skill, and the set crowded out everything else in the
 agent's skill listing. Claude Code lists every installed skill's name and description on every
