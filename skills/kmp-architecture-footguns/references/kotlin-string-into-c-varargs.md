@@ -1,6 +1,6 @@
 ---
 name: kotlin-string-into-c-varargs
-description: "Kotlin/Native passes a Kotlin String in a C variadic argument as a UTF-8 char*, never as an NSString, so NSLog(\"... %@\", text) makes the format engine read string bytes as an Objective-C object pointer. Covers why it compiles, why it hides in debug-only loggers, the crash signature on an arm64e device, and the one call shape that is safe. Use when an iOS build crashes with EXC_BREAKPOINT inside NSLog or objc_opt_respondsToSelector, when adding iOS logging from Kotlin, or when reviewing any Kotlin call to a C function that takes a format string."
+description: "Kotlin/Native passes a Kotlin String in a C variadic argument as a UTF-8 char*, never as an NSString, so NSLog(\"... %@\", text) makes the format engine read string bytes as an Objective-C object pointer. Covers why it compiles, which other C functions read a vararg as an object (os_log, the CFString formatters, _NSDictionaryOfVariableBindings), why it hides in debug-only loggers, the crash signature on an arm64e device, the one call shape that is safe, and the type-aware check that finds every case. Use when an iOS build crashes with EXC_BREAKPOINT inside NSLog or objc_opt_respondsToSelector, when adding iOS logging from Kotlin, or when reviewing any Kotlin call to a C function that takes a format string."
 ---
 
 # A Kotlin String in a C vararg is a char*
@@ -36,6 +36,16 @@ type-checks. In the 2.4.20 compiler the mapping is one branch of `mapCalleeFunct
 The neighbouring `require(!variadic || !isObjCMethod)` makes the same call a compile error for a
 variadic Objective-C *method* (the `stringWithFormat:` family), so only plain C functions take the
 silent path, and `NSLog` is the one everyone reaches for.
+
+**`NSLog` is not the only C function that reads a vararg as an object.** A metadata dump of the iOS
+platform klibs (`klib dump-metadata` over all 177, Kotlin 2.4.20, `ios_arm64`) lists 142 variadic C
+declarations under 121 names. Most
+are the `printf` family, where `%s` wants a `char*` and a Kotlin `String` is correct. The ones that
+read a slot as an object are `NSLog`; `_os_log_internal`, which is what `os_log` lowers to and whose
+header says the format supports "%@ (objects)"; `CFStringCreateWithFormat`, `CFStringAppendFormat` and
+`CFStringCreateStringWithValidatedFormat`; and `_NSDictionaryOfVariableBindings`. That last one takes no
+format at all, and every argument after `firstValue` is read as an `id`. Any C function from your own
+cinterop `.def` that forwards to `NSLogv` or `os_log` joins the list without appearing in it.
 
 **`%s` "works", and that is its own trap.** A `char*` is what `%s` expects, so the crash goes away.
 Apple's format-specifier table says `%s` reads the bytes in the system default encoding, not UTF-8.
@@ -84,13 +94,23 @@ progress line with `50%` reads a vararg slot nobody filled. Replace `%` with `%%
    It returned the same three lines on the crashing release. Read each hit's callee. A `%@` slot is
    only safe when the Kotlin value is an Objective-C object.
 
-3. **Run the scanner** from the project root. Its kotlin-string-c-vararg detector flags the
-   `NSLog` shape:
+3. **Run the scanner** from the project root:
 
    ```bash
    python3 .claude/skills/footgun-scan/scripts/scan.py --all
    ```
 
-4. **On a device, exercise one call with each kind of argument.** Run a Release build that reaches
+   It flags any `%@` format literal followed by arguments, whatever the callee, any
+   `_NSDictionaryOfVariableBindings` call, and `%s` in an `NSLog` or `os_log` format. On the crashing
+   tree, across 275 files, these detectors reported the three call sites and no false positive. A
+   line pattern cannot see a format held in a variable, a call through a wrapper, or the argument's
+   type, so it is a floor.
+
+4. **For an exact check, use types, not text.** The lowering is decided by the argument's static
+   type, so the precise rule needs type resolution, for example a detekt rule: flag a call to an
+   `external` function with a `variadicArguments` parameter when any vararg expression has type
+   `String` or `String?`. That rule needs no list of callees and covers your own cinterop libraries.
+
+5. **On a device, exercise one call with each kind of argument.** Run a Release build that reaches
    the log line, then check Console.app. A fixed call prints the whole line. A broken one ends the
    process with the crash signature above. No simulator or unit test reaches this lowering.

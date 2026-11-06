@@ -90,7 +90,7 @@ each one, and opens only the files that apply.
 
 ## Scanning a change
 
-`footgun-scan` turns the traps into a check. It matches 33 patterns against the lines a change
+`footgun-scan` turns the traps into a check. It matches 35 patterns against the lines a change
 adds; each pattern is tied to one trap, and the agent opens that trap to confirm or dismiss every
 hit. Ask for it in plain words ("check my uncommitted Kotlin changes for footguns"), or run the
 script yourself, for example as a CI step:
