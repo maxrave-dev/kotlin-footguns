@@ -5,7 +5,7 @@ description: "Scan a Kotlin or Compose Multiplatform diff for known footgun shap
 
 # Footgun scan
 
-`scripts/scan.py` matches 32 patterns against the lines a change adds. Each pattern is tied to one
+`scripts/scan.py` matches 35 patterns against the lines a change adds. Each pattern is tied to one
 trap file in the kotlin-footguns area skills. It finds shapes, not bugs: every hit needs the trap's
 judgment before it becomes a finding.
 
